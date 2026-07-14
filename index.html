@@ -130,6 +130,33 @@ h1, h2, h3 { font-family: var(--display); font-weight: 400; margin: 0; }
 #board-waiting { margin-top: 6vh; font-size: clamp(1.2rem, 2.6vw, 2.2rem); font-weight: 700; color: var(--muted); }
 #board-team-list { list-style: none; padding: 0; margin: 2vh auto 0; font-size: clamp(1.4rem, 3vw, 2.6rem); font-weight: 800; }
 
+/* ---------- ADMIN CONSOLE ---------- */
+.panel-title { font-size: 1.05rem; margin-bottom: .8rem; }
+.field { display: block; font-weight: 700; font-size: .85rem; color: var(--muted); margin: .7rem 0; }
+.field .input { margin-top: .3rem; }
+.field-check { display: block; font-weight: 700; font-size: .95rem; margin: .9rem 0; }
+.btn.mini { font-size: .8rem; padding: .4rem .8rem; background: #fff; color: var(--ink); border: 2px solid #E9E2F2; box-shadow: none; }
+.btn.danger { background: var(--coral); color: #fff; }
+.btn.mini.danger { background: #fff; color: var(--coral); border-color: var(--coral); }
+.btn.mini.phase-on { background: var(--violet); color: #fff; border-color: var(--violet); }
+.phase-row { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1.1rem; }
+.q-item, .lc-row { display: flex; align-items: center; gap: .6rem; padding: .55rem 0; border-bottom: 1px solid #F1EAF8; flex-wrap: wrap; }
+.q-badge { font-weight: 800; background: var(--sunny); border-radius: 8px; padding: .15rem .5rem; font-size: .8rem; }
+.q-text { flex: 1; min-width: 180px; }
+.q-off { opacity: .45; text-decoration: line-through; }
+.q-actions { display: flex; gap: .4rem; margin-left: auto; align-items: center; }
+.q-opt { display: flex; align-items: center; gap: .5rem; }
+.q-opt .input { margin-top: 0; }
+.mini-num { width: 74px; padding: .4rem .5rem; font-size: .85rem; }
+.data-raw { background: var(--bg); border-radius: 12px; padding: 1rem; font-size: .75rem; overflow-x: auto; max-height: 50vh; }
+#admin-toast {
+  position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%);
+  background: var(--ink); color: #fff; font-weight: 700; font-size: .9rem;
+  padding: .6rem 1.2rem; border-radius: 999px; z-index: 60; box-shadow: var(--shadow);
+}
+.board-challenge { font-family: var(--display); font-size: clamp(1.6rem, 4vw, 3.4rem); margin-top: 3vh; }
+.board-clock { font-family: var(--display); font-size: clamp(3rem, 10vw, 8rem); }
+
 /* ---------- HOST VIEW ---------- */
 #view-host { max-width: 860px; margin: 0 auto; padding: 1.2rem; }
 #host-tabs { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1.2rem 0; }
@@ -197,6 +224,7 @@ h1, h2, h3 { font-family: var(--display); font-weight: 400; margin: 0; }
 <section id="view-board" hidden>
   <h1 class="event-name">…</h1>
   <div class="event-subtitle"></div>
+  <div id="board-phase"></div>
   <div id="board-waiting">Waiting for teams to join…</div>
   <ul id="board-team-list"></ul>
 </section>
@@ -224,6 +252,7 @@ h1, h2, h3 { font-family: var(--display); font-weight: 400; margin: 0; }
     <nav id="host-tabs"></nav>
     <div id="host-panel" class="card"></div>
   </div>
+  <div id="admin-toast" hidden></div>
 </section>
 
 <script>
@@ -249,6 +278,7 @@ const DEFAULT_CONFIG = {
   labels: { challenge1: 'The Scramble', challenge2: 'Blind Shot' },
   sounds: false,
   bonuses: [30, 20, 10],
+  slotsPerStation: 3,
   lockoutSec: 30,
   scrambleMins: 25,
   blindBaseSec: 120,
@@ -279,6 +309,10 @@ function initFirebase() {
   db.ref('config').on('value', (snap) => {
     config = { ...structuredClone(DEFAULT_CONFIG), ...(snap.val() || {}) };
     renderEventBranding();
+    renderBoardPhase();
+    renderTeamStatus();
+    /* keep the phase highlight in Live Control current */
+    if (adminSubsStarted && activeTab === 'Live Control') renderHostPanel();
   });
 }
 
@@ -408,7 +442,20 @@ function watchMyTeam(teamId) {
     document.getElementById('w-seconds').textContent = (team.bonusSec || 0) + 's';
     document.getElementById('w-cards').textContent = Object.keys(team.powerups || {}).length;
     document.getElementById('w-stations').textContent = Object.keys(team.cleared || {}).length;
+    renderTeamStatus();
   });
+}
+
+/* Phase-aware status line on the joined card */
+function renderTeamStatus() {
+  const el = document.getElementById('team-status');
+  if (!el || document.getElementById('team-joined').hidden) return;
+  const phase = config.phase || 'setup';
+  el.textContent =
+    phase === 'scramble' ? config.labels.challenge1 + ' is on — go hunt!' :
+    phase === 'blindshot' ? 'Wallet locked — it’s ' + config.labels.challenge2 + ' time.' :
+    phase === 'results' ? 'Game over — eyes on the big screen!' :
+    'You’re in! Waiting for the game to begin…';
 }
 
 function restoreTeamSession() {
@@ -418,8 +465,33 @@ function restoreTeamSession() {
 }
 
 /* ======================================================================
-   BOARD VIEW — live team list (leaderboard / timer stage come later)
+   BOARD VIEW — live team list + phase headline
+   (full leaderboard / timer stage come with the Scramble engine)
    ====================================================================== */
+function renderBoardPhase() {
+  const el = document.getElementById('board-phase');
+  const phase = config.phase || 'setup';
+  if (phase === 'scramble') {
+    el.innerHTML = '<div class="board-challenge">' + esc(config.labels.challenge1) + '</div>' +
+      '<div id="board-clock" class="board-clock"></div>';
+    updateBoardClock();
+  } else if (phase === 'blindshot') {
+    el.innerHTML = '<div class="board-challenge">' + esc(config.labels.challenge2) + '</div>';
+  } else if (phase === 'results') {
+    el.innerHTML = '<div class="board-challenge">Final results</div>';
+  } else {
+    el.innerHTML = '';
+  }
+}
+
+function updateBoardClock() {
+  const el = document.getElementById('board-clock');
+  if (!el) return;
+  if ((config.phase || 'setup') !== 'scramble' || !config.scrambleEndsAt) { el.textContent = ''; return; }
+  const remain = Math.max(0, Math.floor((config.scrambleEndsAt - Date.now()) / 1000));
+  el.textContent = Math.floor(remain / 60) + ':' + String(remain % 60).padStart(2, '0');
+}
+
 function watchBoardTeams() {
   if (!db) return;
   db.ref('teams').on('value', (snap) => {
@@ -457,47 +529,319 @@ function handlePinSubmit(e) {
   }
 }
 
+let activeTab = 'Event';
+let adminTeams = {};
+let adminQuestions = {};
+let adminSubsStarted = false;
+let questionEditorOpen = false;
+
 function showHostConsole() {
   document.getElementById('pin-form').hidden = true;
   document.getElementById('host-console').hidden = false;
   renderEventBranding();
+  startAdminSubscriptions();
   renderHostTabs();
+  renderHostPanel();
+}
+
+function startAdminSubscriptions() {
+  if (adminSubsStarted || !db) return;
+  adminSubsStarted = true;
+  db.ref('teams').on('value', (s) => {
+    adminTeams = s.val() || {};
+    if (activeTab === 'Live Control' || activeTab === 'Data') renderHostPanel();
+  });
+  db.ref('questions').on('value', (s) => {
+    adminQuestions = s.val() || {};
+    if (activeTab === 'Questions' && !questionEditorOpen) renderHostPanel();
+  });
 }
 
 function renderHostTabs() {
   const nav = document.getElementById('host-tabs');
   nav.innerHTML = '';
-  HOST_TABS.forEach((label, i) => {
+  HOST_TABS.forEach((label) => {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.textContent = label;
-    btn.addEventListener('click', () => selectHostTab(i));
+    btn.className = (label === activeTab) ? 'active' : '';
+    btn.addEventListener('click', () => {
+      activeTab = label;
+      questionEditorOpen = false;
+      renderHostTabs();
+      renderHostPanel();
+    });
     nav.appendChild(btn);
   });
-  selectHostTab(0);
 }
 
-function selectHostTab(index) {
-  document.querySelectorAll('#host-tabs button').forEach((b, i) => {
-    b.classList.toggle('active', i === index);
-  });
+function renderHostPanel() {
   const panel = document.getElementById('host-panel');
-  if (HOST_TABS[index] === 'Event') {
-    panel.innerHTML =
-      '<h3 style="font-size:1.05rem;">Event</h3>' +
-      '<p style="color:var(--muted);">Current settings (editable once the backend is wired):</p>' +
-      '<ul style="line-height:1.9;">' +
-      '<li><b>Event name:</b> ' + config.eventName + '</li>' +
-      '<li><b>Subtitle:</b> ' + config.eventSubtitle + '</li>' +
-      '<li><b>Challenge 1:</b> ' + config.labels.challenge1 + '</li>' +
-      '<li><b>Challenge 2:</b> ' + config.labels.challenge2 + '</li>' +
-      '<li><b>Sounds:</b> ' + (config.sounds ? 'on' : 'off') + '</li>' +
-      '</ul>';
-  } else {
-    panel.innerHTML =
-      '<h3 style="font-size:1.05rem;">' + HOST_TABS[index] + '</h3>' +
-      '<p style="color:var(--muted);">Built in a later step.</p>';
+  if (!db) {
+    panel.innerHTML = '<p style="color:var(--muted);">Backend not connected — the console needs Firebase.</p>';
+    return;
   }
+  if (activeTab === 'Event') renderEventTab(panel);
+  else if (activeTab === 'Questions') renderQuestionsTab(panel);
+  else if (activeTab === 'Rules') renderRulesTab(panel);
+  else if (activeTab === 'Live Control') renderLiveControlTab(panel);
+  else if (activeTab === 'Data') renderDataTab(panel);
+  else panel.innerHTML = '<h3 class="panel-title">' + activeTab + '</h3>' +
+    '<p style="color:var(--muted);">Built in a later step.</p>';
+}
+
+/* Small helpers shared by the admin tabs */
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+async function sha256(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function adminToast(msg) {
+  const el = document.getElementById('admin-toast');
+  el.textContent = msg;
+  el.hidden = false;
+  clearTimeout(adminToast._t);
+  adminToast._t = setTimeout(() => { el.hidden = true; }, 2200);
+}
+
+/* ---- Event tab: name/subtitle/labels propagate live to every view ---- */
+function renderEventTab(panel) {
+  panel.innerHTML =
+    '<h3 class="panel-title">Event</h3>' +
+    '<label class="field">Event name<input id="ev-name" class="input" maxlength="60" value="' + esc(config.eventName) + '"></label>' +
+    '<label class="field">Subtitle / date line<input id="ev-subtitle" class="input" maxlength="80" value="' + esc(config.eventSubtitle) + '"></label>' +
+    '<label class="field">Challenge 1 label<input id="ev-c1" class="input" maxlength="40" value="' + esc(config.labels.challenge1) + '"></label>' +
+    '<label class="field">Challenge 2 label<input id="ev-c2" class="input" maxlength="40" value="' + esc(config.labels.challenge2) + '"></label>' +
+    '<label class="field-check"><input id="ev-sounds" type="checkbox"' + (config.sounds ? ' checked' : '') + '> Board sound effects</label>' +
+    '<button id="ev-save" class="btn violet">Save</button>';
+  document.getElementById('ev-save').addEventListener('click', () => {
+    db.ref('config').update({
+      eventName: document.getElementById('ev-name').value.trim() || DEFAULT_CONFIG.eventName,
+      eventSubtitle: document.getElementById('ev-subtitle').value.trim(),
+      labels: {
+        challenge1: document.getElementById('ev-c1').value.trim() || DEFAULT_CONFIG.labels.challenge1,
+        challenge2: document.getElementById('ev-c2').value.trim() || DEFAULT_CONFIG.labels.challenge2,
+      },
+      sounds: document.getElementById('ev-sounds').checked,
+    }).then(() => adminToast('Saved — every screen updates live ✓'));
+  });
+}
+
+/* ---- Rules tab: every gameplay default from SPEC.md §5–§7 ---- */
+function renderRulesTab(panel) {
+  const num = (label, id, value, min, max) =>
+    '<label class="field">' + label +
+    '<input id="' + id + '" class="input" type="number" min="' + min + '" max="' + max + '" value="' + value + '"></label>';
+  panel.innerHTML =
+    '<h3 class="panel-title">Rules</h3>' +
+    num('1st correct bonus (seconds)', 'ru-b1', config.bonuses[0], 0, 600) +
+    num('2nd correct bonus (seconds)', 'ru-b2', config.bonuses[1], 0, 600) +
+    num('3rd correct bonus (seconds)', 'ru-b3', config.bonuses[2], 0, 600) +
+    num('Podium slots per station', 'ru-slots', config.slotsPerStation, 1, 5) +
+    num('Wrong-answer lockout (seconds)', 'ru-lock', config.lockoutSec, 0, 600) +
+    num('Scramble length (minutes)', 'ru-mins', config.scrambleMins, 1, 120) +
+    num('Blind Shot base time (seconds)', 'ru-base', config.blindBaseSec, 0, 900) +
+    num('Team cap', 'ru-cap', config.teamCap, 1, 12) +
+    '<label class="field">Host PIN<input id="ru-pin" class="input" maxlength="8" value="' + esc(config.hostPin) + '"></label>' +
+    '<button id="ru-save" class="btn violet">Save</button>';
+  document.getElementById('ru-save').addEventListener('click', () => {
+    const val = (id, def) => {
+      const n = parseInt(document.getElementById(id).value, 10);
+      return isNaN(n) ? def : n;
+    };
+    db.ref('config').update({
+      bonuses: [val('ru-b1', 30), val('ru-b2', 20), val('ru-b3', 10)],
+      slotsPerStation: val('ru-slots', 3),
+      lockoutSec: val('ru-lock', 30),
+      scrambleMins: val('ru-mins', 25),
+      blindBaseSec: val('ru-base', 120),
+      teamCap: val('ru-cap', 5),
+      hostPin: document.getElementById('ru-pin').value.trim() || '1234',
+    }).then(() => adminToast('Rules saved ✓'));
+  });
+}
+
+/* ---- Questions tab: 1:1 with station QRs; answers stored as salted hashes ---- */
+function nextQuestionId() {
+  for (let i = 1; i <= 99; i++) {
+    const id = 'S' + String(i).padStart(2, '0');
+    if (!adminQuestions[id]) return id;
+  }
+}
+
+function renderQuestionsTab(panel) {
+  const ids = Object.keys(adminQuestions).sort();
+  let html = '<h3 class="panel-title">Questions</h3>' +
+    '<p style="color:var(--muted); font-size:.9rem;">' + ids.length +
+    ' question' + (ids.length === 1 ? '' : 's') +
+    ' — SPEC suggests 15–20. Each is tied 1:1 to its station QR (S01 → GA-S01).</p>';
+  html += ids.map((id) => {
+    const q = adminQuestions[id];
+    return '<div class="q-item"><span class="q-badge">' + id + '</span>' +
+      '<span class="q-text' + (q.active === false ? ' q-off' : '') + '">' + esc(q.text) + '</span>' +
+      '<span class="q-actions">' +
+      '<button class="btn mini" data-act="toggle" data-id="' + id + '">' + (q.active === false ? 'Enable' : 'Disable') + '</button>' +
+      '<button class="btn mini" data-act="edit" data-id="' + id + '">Edit</button>' +
+      '<button class="btn mini danger" data-act="del" data-id="' + id + '">Delete</button></span></div>';
+  }).join('');
+  html += '<div id="q-editor"></div>' +
+    '<button id="q-add" class="btn violet" style="margin-top:1rem;">+ Add question</button>';
+  panel.innerHTML = html;
+  panel.querySelectorAll('[data-act]').forEach((btn) => btn.addEventListener('click', onQuestionAction));
+  document.getElementById('q-add').addEventListener('click', () => openQuestionEditor(null));
+}
+
+function onQuestionAction(e) {
+  const id = e.target.dataset.id;
+  const act = e.target.dataset.act;
+  if (act === 'toggle') {
+    db.ref('questions/' + id + '/active').set(adminQuestions[id].active === false);
+  } else if (act === 'del') {
+    if (confirm('Delete ' + id + '? Its station QR poster stops working.')) {
+      db.ref('questions/' + id).remove().then(() => adminToast(id + ' deleted'));
+    }
+  } else if (act === 'edit') {
+    openQuestionEditor(id);
+  }
+}
+
+function openQuestionEditor(id) {
+  questionEditorOpen = true;
+  const q = id ? adminQuestions[id] : { text: '', options: ['', '', '', ''] };
+  const box = document.getElementById('q-editor');
+  box.innerHTML =
+    '<div class="card" style="margin-top:1rem; background:var(--bg); box-shadow:none;">' +
+    '<b>' + (id ? 'Edit ' + id : 'New question (' + nextQuestionId() + ')') + '</b>' +
+    '<label class="field">Question<input id="qe-text" class="input" maxlength="200" value="' + esc(q.text) + '"></label>' +
+    [0, 1, 2, 3].map((i) =>
+      '<label class="field q-opt"><input type="radio" name="qe-correct" value="' + i + '">' +
+      '<input id="qe-opt' + i + '" class="input" maxlength="80" placeholder="Option ' + (i + 1) + '" value="' + esc((q.options || [])[i] || '') + '"></label>'
+    ).join('') +
+    '<p style="font-size:.83rem; color:var(--muted);">Tick the radio next to the correct option. Answers are stored as salted hashes, so the correct one must be re-picked every time you save.</p>' +
+    '<button id="qe-save" class="btn violet">Save question</button> ' +
+    '<button id="qe-cancel" class="btn mini">Cancel</button>' +
+    '<div id="qe-notice" class="notice" hidden></div></div>';
+  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  document.getElementById('qe-cancel').addEventListener('click', () => {
+    questionEditorOpen = false;
+    renderHostPanel();
+  });
+  document.getElementById('qe-save').addEventListener('click', async () => {
+    const text = document.getElementById('qe-text').value.trim();
+    const options = [0, 1, 2, 3].map((i) => document.getElementById('qe-opt' + i).value.trim());
+    const picked = document.querySelector('input[name="qe-correct"]:checked');
+    const notice = document.getElementById('qe-notice');
+    if (!text || options.some((o) => !o) || !picked) {
+      notice.textContent = 'Fill the question, all 4 options, and tick the correct one.';
+      notice.hidden = false;
+      return;
+    }
+    const qid = id || nextQuestionId();
+    const salt = Math.random().toString(36).slice(2, 10);
+    const answerHash = await sha256(qid + '|' + salt + '|' + picked.value);
+    questionEditorOpen = false;
+    db.ref('questions/' + qid).set({
+      text: text,
+      options: options,
+      salt: salt,
+      answerHash: answerHash,
+      active: id ? adminQuestions[id].active !== false : true,
+    }).then(() => adminToast(qid + ' saved ✓'));
+  });
+}
+
+/* ---- Live Control tab: phases, per-team adjustments, release, reset ---- */
+function renderLiveControlTab(panel) {
+  const phases = [['setup', 'Setup'], ['scramble', 'Scramble'], ['blindshot', 'Blind Shot'], ['results', 'Results']];
+  let html = '<h3 class="panel-title">Live Control</h3><div class="phase-row">' +
+    phases.map(([key, label]) =>
+      '<button class="btn mini' + ((config.phase || 'setup') === key ? ' phase-on' : '') + '" data-phase="' + key + '" data-label="' + label + '">' + label + '</button>'
+    ).join('') + '</div>';
+  const ids = Object.keys(adminTeams).sort((a, b) => (adminTeams[a].joinedAt || 0) - (adminTeams[b].joinedAt || 0));
+  html += ids.length ? ids.map((id) => {
+    const t = adminTeams[id];
+    return '<div class="lc-row"><span class="team-dot" style="background:' + esc(t.colour) + '"></span>' +
+      '<b>' + esc(t.name) + '</b>' +
+      '<span style="color:var(--muted); font-size:.85rem;">' + (t.bonusSec || 0) + 's banked' + (t.deviceToken ? '' : ' · 📵 released') + '</span>' +
+      '<span class="q-actions">' +
+      '<input id="adj-' + id + '" class="input mini-num" type="number" placeholder="±s">' +
+      '<button class="btn mini" data-adj="' + id + '">Apply</button>' +
+      '<button class="btn mini" data-release="' + id + '"' + (t.deviceToken ? '' : ' disabled') + '>Release device</button>' +
+      '<button class="btn mini danger" data-remove="' + id + '">Remove</button></span></div>';
+  }).join('') : '<p style="color:var(--muted);">No teams registered yet.</p>';
+  html += '<hr style="margin:1.2rem 0; border:none; border-top:2px solid #F1EAF8;">' +
+    '<button id="lc-reset" class="btn danger">Reset game (keeps questions & settings)</button>';
+  panel.innerHTML = html;
+
+  panel.querySelectorAll('[data-phase]').forEach((btn) => btn.addEventListener('click', () => {
+    const phase = btn.dataset.phase;
+    if (!confirm('Switch phase to ' + btn.dataset.label + '?')) return;
+    const updates = { phase: phase };
+    updates.scrambleEndsAt = (phase === 'scramble') ? Date.now() + (config.scrambleMins || 25) * 60000 : null;
+    db.ref('config').update(updates).then(() => adminToast('Phase: ' + btn.dataset.label));
+  }));
+  panel.querySelectorAll('[data-adj]').forEach((btn) => btn.addEventListener('click', () => {
+    const id = btn.dataset.adj;
+    const delta = parseInt(document.getElementById('adj-' + id).value, 10);
+    if (!delta) return;
+    db.ref('teams/' + id + '/bonusSec').transaction((v) => Math.max(0, (v || 0) + delta))
+      .then(() => adminToast((delta > 0 ? '+' : '') + delta + 's applied'));
+  }));
+  panel.querySelectorAll('[data-release]').forEach((btn) => btn.addEventListener('click', () => {
+    const id = btn.dataset.release;
+    if (!confirm('Release ' + adminTeams[id].name + "'s device? The next phone to join with this exact team name takes over.")) return;
+    db.ref('teams/' + id + '/deviceToken').remove().then(() => adminToast('Device released'));
+  }));
+  panel.querySelectorAll('[data-remove]').forEach((btn) => btn.addEventListener('click', () => {
+    const id = btn.dataset.remove;
+    if (!confirm('Remove team "' + adminTeams[id].name + '" entirely?')) return;
+    db.ref('teams/' + id).remove().then(() => adminToast('Team removed'));
+  }));
+  document.getElementById('lc-reset').addEventListener('click', () => {
+    if (!confirm('Reset the game? This deletes ALL teams and progress. Questions & settings stay.')) return;
+    db.ref().update({
+      teams: null, stations: null, blindshot: null, feed: null, cards: null,
+      'config/phase': 'setup', 'config/scrambleEndsAt': null,
+    }).then(() => adminToast('Game reset — back to Setup'));
+  });
+}
+
+/* ---- Data tab: raw state + CSV export (SPEC.md §9) ---- */
+function renderDataTab(panel) {
+  panel.innerHTML = '<h3 class="panel-title">Data</h3>' +
+    '<button id="data-refresh" class="btn mini">Refresh</button> ' +
+    '<button id="data-csv" class="btn violet" style="margin-left:.5rem;">Export results CSV</button>' +
+    '<pre id="data-raw" class="data-raw">Loading…</pre>';
+  const load = () => db.ref('/').once('value').then((s) => {
+    document.getElementById('data-raw').textContent = JSON.stringify(s.val(), null, 2) || '(empty)';
+  });
+  load();
+  document.getElementById('data-refresh').addEventListener('click', load);
+  document.getElementById('data-csv').addEventListener('click', exportCsv);
+}
+
+function exportCsv() {
+  const rows = [['Team', 'Colour', 'Banked seconds', 'Stations cleared', 'Power-up cards', 'Baskets']];
+  Object.values(adminTeams)
+    .sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0))
+    .forEach((t) => rows.push([
+      t.name, t.colour, t.bonusSec || 0,
+      Object.keys(t.cleared || {}).length,
+      Object.keys(t.powerups || {}).length,
+      '', /* baskets — filled once Blind Shot is built */
+    ]));
+  const csv = rows.map((r) => r.map((v) => '"' + String(v).replace(/"/g, '""') + '"').join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = (config.eventName || 'results').replace(/[^\w-]+/g, '-') + '-results.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  adminToast('CSV downloaded');
 }
 
 /* ======================================================================
@@ -517,6 +861,8 @@ window.addEventListener('DOMContentLoaded', () => {
   if (sessionStorage.getItem('sbHostOk') === '1') showHostConsole();
   restoreTeamSession();
   watchBoardTeams();
+  renderBoardPhase();
+  setInterval(updateBoardClock, 1000);
 });
 </script>
 </body>
