@@ -114,6 +114,14 @@ h1, h2, h3 { font-family: var(--display); font-weight: 400; margin: 0; }
 #view-team { max-width: 430px; margin: 0 auto; padding: 1.2rem; }
 #view-team .event-name { font-size: 1.5rem; line-height: 1.2; }
 #view-team header { margin: .8rem 0 1.4rem; }
+.team-dot { width: 22px; height: 22px; border-radius: 50%; display: inline-block; flex: none; }
+.wallet { display: flex; gap: .6rem; margin-top: 1.1rem; }
+.wallet-stat {
+  flex: 1; text-align: center; background: var(--bg);
+  border-radius: 14px; padding: .7rem .3rem;
+}
+.wallet-stat b { display: block; font-size: 1.35rem; }
+.wallet-stat span { font-size: .78rem; color: var(--muted); font-weight: 600; }
 
 /* ---------- BOARD VIEW (1080p projection — hall-scale type) ---------- */
 #view-board { text-align: center; padding: 4vh 4vw; }
@@ -160,7 +168,7 @@ h1, h2, h3 { font-family: var(--display); font-weight: 400; margin: 0; }
     <h1 class="event-name">…</h1>
     <div class="event-subtitle"></div>
   </header>
-  <div class="card">
+  <div class="card" id="team-register">
     <h2 style="font-size:1.15rem; margin-bottom:1rem;">Register your team</h2>
     <input id="team-name-input" class="input" type="text" maxlength="24"
            placeholder="Team name" autocomplete="off">
@@ -168,6 +176,18 @@ h1, h2, h3 { font-family: var(--display); font-weight: 400; margin: 0; }
       <button id="join-btn" class="btn">Join</button>
     </div>
     <div id="team-notice" class="notice" hidden></div>
+  </div>
+  <div class="card" id="team-joined" hidden>
+    <div style="display:flex; align-items:center; gap:.7rem;">
+      <span id="team-dot" class="team-dot"></span>
+      <h2 id="team-joined-name" style="font-size:1.3rem;"></h2>
+    </div>
+    <p id="team-status" style="color:var(--muted); font-weight:600;">You're in! Waiting for the game to begin…</p>
+    <div class="wallet">
+      <div class="wallet-stat"><b id="w-seconds">0s</b><span>banked</span></div>
+      <div class="wallet-stat"><b id="w-cards">0</b><span>cards</span></div>
+      <div class="wallet-stat"><b id="w-stations">0</b><span>stations</span></div>
+    </div>
   </div>
 </section>
 
@@ -211,7 +231,17 @@ h1, h2, h3 { font-family: var(--display); font-weight: 400; margin: 0; }
    CONFIG — defaults mirror /config in the Realtime Database (SPEC.md §11).
    Values here are fallbacks; once Firebase is wired, /config wins.
    ====================================================================== */
-const FIREBASE_CONFIG = null; /* ← paste the Firebase web config object here */
+/* Firebase web config — public identifiers by design (SPEC.md §11).
+   databaseURL is filled in once the Realtime Database instance exists. */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCk0l0sLaGAyzetGt61tNzuv6sZUnrOXYg",
+  authDomain: "welcome-party2026.firebaseapp.com",
+  databaseURL: "", /* ← pending: create Realtime Database in Firebase console */
+  projectId: "welcome-party2026",
+  storageBucket: "welcome-party2026.firebasestorage.app",
+  messagingSenderId: "685493857628",
+  appId: "1:685493857628:web:c7dcde709ff7e64b792599",
+};
 
 const DEFAULT_CONFIG = {
   eventName: '2026 xBU GA Welcome Party',
@@ -240,7 +270,7 @@ let config = structuredClone(DEFAULT_CONFIG);
 let db = null;
 
 function initFirebase() {
-  if (!FIREBASE_CONFIG) {
+  if (!FIREBASE_CONFIG || !FIREBASE_CONFIG.databaseURL) {
     document.getElementById('offline-pill').hidden = false;
     return;
   }
@@ -279,12 +309,26 @@ function renderEventBranding() {
 }
 
 /* ======================================================================
-   TEAM VIEW — registration shell (device binding + wallet come next)
+   TEAM VIEW — registration, one-device binding, session restore
+   (SPEC.md §4.1, §4.6)
    ====================================================================== */
+const LS_TEAM_ID = 'sbTeamId';
+const LS_DEVICE_TOKEN = 'sbDeviceToken';
+
 function teamNotice(msg) {
   const el = document.getElementById('team-notice');
   el.textContent = msg;
   el.hidden = false;
+}
+
+function deviceToken() {
+  let t = localStorage.getItem(LS_DEVICE_TOKEN);
+  if (!t) {
+    t = (crypto.randomUUID) ? crypto.randomUUID()
+      : 'd-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    localStorage.setItem(LS_DEVICE_TOKEN, t);
+  }
+  return t;
 }
 
 function handleJoin() {
@@ -294,13 +338,106 @@ function handleJoin() {
     teamNotice('Backend not connected yet — registration activates once Firebase is configured.');
     return;
   }
-  /* Real registration (team record + device token, SPEC.md §4.1/§4.6) is the next build step. */
+  const token = deviceToken();
+  const newRef = db.ref('teams').push();
+  let joinedId = null;
+
+  db.ref('teams').transaction((teams) => {
+    const list = teams || {};
+    /* Same name on a released team? → claim it (host-controlled transfer, §4.6) */
+    for (const id in list) {
+      if ((list[id].name || '').toLowerCase() === name.toLowerCase()) {
+        if (!list[id].deviceToken) {
+          list[id].deviceToken = token;
+          joinedId = id;
+          return list;
+        }
+        return; /* name taken by an active team → abort */
+      }
+    }
+    if (Object.keys(list).length >= (config.teamCap || 5)) return; /* cap reached → abort */
+    joinedId = newRef.key;
+    list[newRef.key] = {
+      name: name,
+      colour: TEAM_COLOURS[Object.keys(list).length % TEAM_COLOURS.length],
+      deviceToken: token,
+      bonusSec: 0,
+      joinedAt: Date.now(),
+    };
+    return list;
+  }, (err, committed) => {
+    if (err) { teamNotice('Connection hiccup — try again.'); return; }
+    if (!committed) {
+      db.ref('teams').once('value').then((snap) => {
+        const list = snap.val() || {};
+        const taken = Object.values(list).some((t) =>
+          (t.name || '').toLowerCase() === name.toLowerCase() && t.deviceToken);
+        teamNotice(taken
+          ? 'This team is already active on another device.'
+          : 'All ' + (config.teamCap || 5) + ' team spots are taken.');
+      });
+      return;
+    }
+    localStorage.setItem(LS_TEAM_ID, joinedId);
+    watchMyTeam(joinedId);
+  });
+}
+
+/* Live-subscribe to my team record; enforce the device binding */
+function watchMyTeam(teamId) {
+  db.ref('teams/' + teamId).on('value', (snap) => {
+    const team = snap.val();
+    const reg = document.getElementById('team-register');
+    const joined = document.getElementById('team-joined');
+    if (!team) { /* game was reset — back to registration */
+      localStorage.removeItem(LS_TEAM_ID);
+      reg.hidden = false; joined.hidden = true;
+      return;
+    }
+    if (team.deviceToken !== localStorage.getItem(LS_DEVICE_TOKEN)) {
+      /* host released this team & another phone claimed it */
+      localStorage.removeItem(LS_TEAM_ID);
+      db.ref('teams/' + teamId).off();
+      reg.hidden = false; joined.hidden = true;
+      teamNotice('This team is now active on another device.');
+      return;
+    }
+    reg.hidden = true; joined.hidden = false;
+    document.getElementById('team-joined-name').textContent = team.name;
+    document.getElementById('team-dot').style.background = team.colour;
+    document.getElementById('w-seconds').textContent = (team.bonusSec || 0) + 's';
+    document.getElementById('w-cards').textContent = Object.keys(team.powerups || {}).length;
+    document.getElementById('w-stations').textContent = Object.keys(team.cleared || {}).length;
+  });
+}
+
+function restoreTeamSession() {
+  if (!db) return;
+  const teamId = localStorage.getItem(LS_TEAM_ID);
+  if (teamId) watchMyTeam(teamId);
 }
 
 /* ======================================================================
-   BOARD VIEW — splash shell (leaderboard / timer stage come later)
+   BOARD VIEW — live team list (leaderboard / timer stage come later)
    ====================================================================== */
-/* Live team list will subscribe to /teams once Firebase is wired. */
+function watchBoardTeams() {
+  if (!db) return;
+  db.ref('teams').on('value', (snap) => {
+    const list = snap.val() || {};
+    const teams = Object.values(list).sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
+    const ul = document.getElementById('board-team-list');
+    ul.innerHTML = '';
+    teams.forEach((t) => {
+      const li = document.createElement('li');
+      li.textContent = t.name;
+      li.style.color = t.colour;
+      ul.appendChild(li);
+    });
+    document.getElementById('board-waiting').textContent = teams.length
+      ? teams.length + ' / ' + (config.teamCap || 5) + ' teams ready'
+      : 'Waiting for teams to join…';
+  });
+}
 
 /* ======================================================================
    HOST VIEW — PIN gate + tab scaffold (SPEC.md §9)
@@ -378,6 +515,8 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('join-btn').addEventListener('click', handleJoin);
   document.getElementById('pin-form').addEventListener('submit', handlePinSubmit);
   if (sessionStorage.getItem('sbHostOk') === '1') showHostConsole();
+  restoreTeamSession();
+  watchBoardTeams();
 });
 </script>
 </body>
