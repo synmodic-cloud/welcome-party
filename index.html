@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Welcome Party</title>
+
+<!-- ======================================================================
+     FONTS & CDN LIBRARIES  (SPEC.md §11 — CDN only, no build step)
+     ====================================================================== -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script defer src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+
+<style>
+/* ======================================================================
+   STYLE TOKENS  (CLAUDE.md — placeholder hexes until brand pass)
+   ====================================================================== */
+:root {
+  --bg:      #FFF9F2;   /* warm off-white */
+  --coral:   #FF6B5E;
+  --violet:  #8B5CF6;
+  --sky:     #38BDF8;
+  --sunny:   #FFD166;
+  --mint:    #3ECFA5;   /* 5th team accent — placeholder until brand pass */
+  --ink:     #3B3243;
+  --muted:   #7A7185;
+  --card:    #FFFFFF;
+  --radius:  22px;
+  --shadow:  0 6px 24px rgba(60, 40, 80, .10);
+  --display: 'Archivo Black', sans-serif;
+  --body:    'Plus Jakarta Sans', sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--body);
+  min-height: 100vh;
+}
+h1, h2, h3 { font-family: var(--display); font-weight: 400; margin: 0; }
+[hidden] { display: none !important; }
+
+.card {
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1.5rem;
+}
+.btn {
+  font-family: var(--body);
+  font-weight: 800;
+  font-size: 1.05rem;
+  color: #fff;
+  background: var(--coral);
+  border: none;
+  border-radius: 999px;
+  padding: .95rem 1.8rem;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(255, 107, 94, .4);
+  transition: transform .08s ease;
+}
+.btn:active { transform: scale(.97); }
+.btn.violet { background: var(--violet); box-shadow: 0 4px 14px rgba(139, 92, 246, .4); }
+.input {
+  font-family: var(--body);
+  font-size: 1.05rem;
+  padding: .9rem 1.1rem;
+  border: 2px solid #E9E2F2;
+  border-radius: 14px;
+  width: 100%;
+  background: #fff;
+  color: var(--ink);
+}
+.input:focus { outline: none; border-color: var(--violet); }
+.notice {
+  margin-top: .8rem;
+  padding: .7rem 1rem;
+  border-radius: 12px;
+  background: #FFF1D6;
+  color: #7A5A00;
+  font-size: .92rem;
+  font-weight: 600;
+}
+.event-subtitle { color: var(--muted); font-weight: 600; }
+
+/* Offline pill — shown while Firebase is not configured */
+#offline-pill {
+  position: fixed;
+  top: .8rem;
+  right: .8rem;
+  z-index: 50;
+  background: var(--sunny);
+  color: #6B4E00;
+  font-size: .8rem;
+  font-weight: 700;
+  padding: .35rem .8rem;
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+}
+@media (max-width: 600px) {
+  /* keep the pill clear of the team-view heading on phones */
+  #offline-pill { top: auto; bottom: .8rem; right: 50%; transform: translateX(50%); }
+}
+
+/* ---------- TEAM VIEW (mobile-first) ---------- */
+#view-team { max-width: 430px; margin: 0 auto; padding: 1.2rem; }
+#view-team .event-name { font-size: 1.5rem; line-height: 1.2; }
+#view-team header { margin: .8rem 0 1.4rem; }
+
+/* ---------- BOARD VIEW (1080p projection — hall-scale type) ---------- */
+#view-board { text-align: center; padding: 4vh 4vw; }
+#view-board .event-name { font-size: clamp(3rem, 8vw, 7rem); line-height: 1.05; }
+#view-board .event-subtitle { font-size: clamp(1.1rem, 2.4vw, 2rem); margin-top: 1.2rem; }
+#board-waiting { margin-top: 6vh; font-size: clamp(1.2rem, 2.6vw, 2.2rem); font-weight: 700; color: var(--muted); }
+#board-team-list { list-style: none; padding: 0; margin: 2vh auto 0; font-size: clamp(1.4rem, 3vw, 2.6rem); font-weight: 800; }
+
+/* ---------- HOST VIEW ---------- */
+#view-host { max-width: 860px; margin: 0 auto; padding: 1.2rem; }
+#host-tabs { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1.2rem 0; }
+#host-tabs button {
+  font-family: var(--body);
+  font-weight: 700;
+  font-size: .9rem;
+  padding: .55rem 1rem;
+  border-radius: 999px;
+  border: 2px solid #E9E2F2;
+  background: #fff;
+  color: var(--muted);
+  cursor: pointer;
+}
+#host-tabs button.active { background: var(--violet); border-color: var(--violet); color: #fff; }
+#pin-form { max-width: 340px; margin: 14vh auto 0; text-align: center; }
+#pin-form .input { text-align: center; letter-spacing: .4em; font-size: 1.4rem; }
+
+/* ======================================================================
+   PRINT  (station posters / cards / staff sheet — built in a later step)
+   ====================================================================== */
+@media print {
+  #offline-pill { display: none; }
+}
+</style>
+</head>
+<body>
+
+<div id="offline-pill" hidden>⚡ Backend not connected</div>
+
+<!-- ====================================================================
+     TEAM VIEW  —  #/team (default) · one nominated phone per team
+     ==================================================================== -->
+<section id="view-team" hidden>
+  <header>
+    <h1 class="event-name">…</h1>
+    <div class="event-subtitle"></div>
+  </header>
+  <div class="card">
+    <h2 style="font-size:1.15rem; margin-bottom:1rem;">Register your team</h2>
+    <input id="team-name-input" class="input" type="text" maxlength="24"
+           placeholder="Team name" autocomplete="off">
+    <div style="margin-top:1rem; text-align:center;">
+      <button id="join-btn" class="btn">Join</button>
+    </div>
+    <div id="team-notice" class="notice" hidden></div>
+  </div>
+</section>
+
+<!-- ====================================================================
+     BOARD VIEW  —  #/board · laptop → projector, whole-room display
+     ==================================================================== -->
+<section id="view-board" hidden>
+  <h1 class="event-name">…</h1>
+  <div class="event-subtitle"></div>
+  <div id="board-waiting">Waiting for teams to join…</div>
+  <ul id="board-team-list"></ul>
+</section>
+
+<!-- ====================================================================
+     HOST VIEW  —  #/host · PIN-gated console (7 tabs)
+     ==================================================================== -->
+<section id="view-host" hidden>
+  <!-- PIN gate -->
+  <form id="pin-form">
+    <h2 style="font-size:1.3rem; margin-bottom:1.2rem;">Host console</h2>
+    <input id="pin-input" class="input" type="password" inputmode="numeric"
+           maxlength="8" placeholder="PIN" autocomplete="off">
+    <div style="margin-top:1rem;">
+      <button class="btn violet" type="submit">Unlock</button>
+    </div>
+    <div id="pin-notice" class="notice" hidden></div>
+  </form>
+  <!-- Console (revealed after PIN) -->
+  <div id="host-console" hidden>
+    <header style="margin:.8rem 0;">
+      <h1 class="event-name" style="font-size:1.4rem;">…</h1>
+      <div class="event-subtitle"></div>
+    </header>
+    <nav id="host-tabs"></nav>
+    <div id="host-panel" class="card"></div>
+  </div>
+</section>
+
+<script>
+/* ======================================================================
+   CONFIG — defaults mirror /config in the Realtime Database (SPEC.md §11).
+   Values here are fallbacks; once Firebase is wired, /config wins.
+   ====================================================================== */
+const FIREBASE_CONFIG = null; /* ← paste the Firebase web config object here */
+
+const DEFAULT_CONFIG = {
+  eventName: '2026 xBU GA Welcome Party',
+  eventSubtitle: '22 Jul 2026 · Sports hall',
+  labels: { challenge1: 'The Scramble', challenge2: 'Blind Shot' },
+  sounds: false,
+  bonuses: [30, 20, 10],
+  lockoutSec: 30,
+  scrambleMins: 25,
+  blindBaseSec: 120,
+  teamCap: 5,
+  phase: 'setup',
+  scrambleEndsAt: null,
+  hostPin: '1234',
+};
+
+/* Team accent colours, assigned by join order (5th hex pending brand pass) */
+const TEAM_COLOURS = ['#FF6B5E', '#8B5CF6', '#38BDF8', '#FFD166', '#3ECFA5'];
+
+let config = structuredClone(DEFAULT_CONFIG);
+
+/* ======================================================================
+   FIREBASE — shared state across the 7 devices. Offline mode until the
+   web config is pasted above; every feature must degrade gracefully.
+   ====================================================================== */
+let db = null;
+
+function initFirebase() {
+  if (!FIREBASE_CONFIG) {
+    document.getElementById('offline-pill').hidden = false;
+    return;
+  }
+  firebase.initializeApp(FIREBASE_CONFIG);
+  db = firebase.database();
+  db.ref('config').on('value', (snap) => {
+    config = { ...structuredClone(DEFAULT_CONFIG), ...(snap.val() || {}) };
+    renderEventBranding();
+  });
+}
+
+/* ======================================================================
+   ROUTER — one page, three hash-routed views (SPEC.md §2)
+   ====================================================================== */
+const VIEWS = ['team', 'board', 'host'];
+
+function currentView() {
+  const m = location.hash.match(/^#\/(\w+)/);
+  return m && VIEWS.includes(m[1]) ? m[1] : 'team';
+}
+
+function renderRoute() {
+  const view = currentView();
+  document.body.dataset.view = view;
+  VIEWS.forEach((v) => {
+    document.getElementById('view-' + v).hidden = (v !== view);
+  });
+  renderEventBranding();
+}
+
+/* Event branding — admin-set name/subtitle propagate to every view (§1.1) */
+function renderEventBranding() {
+  document.title = config.eventName;
+  document.querySelectorAll('.event-name').forEach((el) => { el.textContent = config.eventName; });
+  document.querySelectorAll('.event-subtitle').forEach((el) => { el.textContent = config.eventSubtitle; });
+}
+
+/* ======================================================================
+   TEAM VIEW — registration shell (device binding + wallet come next)
+   ====================================================================== */
+function teamNotice(msg) {
+  const el = document.getElementById('team-notice');
+  el.textContent = msg;
+  el.hidden = false;
+}
+
+function handleJoin() {
+  const name = document.getElementById('team-name-input').value.trim();
+  if (!name) { teamNotice('Give your team a name first.'); return; }
+  if (!db) {
+    teamNotice('Backend not connected yet — registration activates once Firebase is configured.');
+    return;
+  }
+  /* Real registration (team record + device token, SPEC.md §4.1/§4.6) is the next build step. */
+}
+
+/* ======================================================================
+   BOARD VIEW — splash shell (leaderboard / timer stage come later)
+   ====================================================================== */
+/* Live team list will subscribe to /teams once Firebase is wired. */
+
+/* ======================================================================
+   HOST VIEW — PIN gate + tab scaffold (SPEC.md §9)
+   ====================================================================== */
+const HOST_TABS = ['Event', 'Questions', 'Rules', 'Codes & Printing', 'Live Control', 'Blind Shot', 'Data'];
+
+function handlePinSubmit(e) {
+  e.preventDefault();
+  const pin = document.getElementById('pin-input').value;
+  if (pin === String(config.hostPin)) {
+    sessionStorage.setItem('sbHostOk', '1');
+    showHostConsole();
+  } else {
+    const el = document.getElementById('pin-notice');
+    el.textContent = 'Wrong PIN.';
+    el.hidden = false;
+  }
+}
+
+function showHostConsole() {
+  document.getElementById('pin-form').hidden = true;
+  document.getElementById('host-console').hidden = false;
+  renderEventBranding();
+  renderHostTabs();
+}
+
+function renderHostTabs() {
+  const nav = document.getElementById('host-tabs');
+  nav.innerHTML = '';
+  HOST_TABS.forEach((label, i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = label;
+    btn.addEventListener('click', () => selectHostTab(i));
+    nav.appendChild(btn);
+  });
+  selectHostTab(0);
+}
+
+function selectHostTab(index) {
+  document.querySelectorAll('#host-tabs button').forEach((b, i) => {
+    b.classList.toggle('active', i === index);
+  });
+  const panel = document.getElementById('host-panel');
+  if (HOST_TABS[index] === 'Event') {
+    panel.innerHTML =
+      '<h3 style="font-size:1.05rem;">Event</h3>' +
+      '<p style="color:var(--muted);">Current settings (editable once the backend is wired):</p>' +
+      '<ul style="line-height:1.9;">' +
+      '<li><b>Event name:</b> ' + config.eventName + '</li>' +
+      '<li><b>Subtitle:</b> ' + config.eventSubtitle + '</li>' +
+      '<li><b>Challenge 1:</b> ' + config.labels.challenge1 + '</li>' +
+      '<li><b>Challenge 2:</b> ' + config.labels.challenge2 + '</li>' +
+      '<li><b>Sounds:</b> ' + (config.sounds ? 'on' : 'off') + '</li>' +
+      '</ul>';
+  } else {
+    panel.innerHTML =
+      '<h3 style="font-size:1.05rem;">' + HOST_TABS[index] + '</h3>' +
+      '<p style="color:var(--muted);">Built in a later step.</p>';
+  }
+}
+
+/* ======================================================================
+   PRINT — station posters, power-up cards, staff master sheet (§10)
+   Print-styled views inside this same file. Built in a later step.
+   ====================================================================== */
+
+/* ======================================================================
+   BOOT — deferred CDN scripts have loaded by DOMContentLoaded
+   ====================================================================== */
+window.addEventListener('DOMContentLoaded', () => {
+  initFirebase();
+  renderRoute();
+  window.addEventListener('hashchange', renderRoute);
+  document.getElementById('join-btn').addEventListener('click', handleJoin);
+  document.getElementById('pin-form').addEventListener('submit', handlePinSubmit);
+  if (sessionStorage.getItem('sbHostOk') === '1') showHostConsole();
+});
+</script>
+</body>
+</html>
