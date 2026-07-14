@@ -14,7 +14,7 @@ A single-file web app ("The Scramble & Blind Shot") for the 2026 xBU GA Welcome 
 
 ## Hard technical constraints (from SPEC.md — do not drift)
 - **One deployed file:** everything lives in a single `index.html` — HTML + CSS + vanilla JS. No frameworks, no build step, no bundler, no extra pages. Hash-routed views: `#/team` (default), `#/board`, `#/host`.
-- Libraries via CDN only: Firebase (Realtime Database), html5-qrcode, qrcode.js, canvas-confetti, Google Fonts (Archivo Black + Plus Jakarta Sans).
+- Libraries via CDN only: Firebase (Realtime Database), html5-qrcode, qrcode.js, canvas-confetti, SheetJS/xlsx (Excel question import), Google Fonts (Archivo Black + Plus Jakarta Sans).
 - Shared state in **Firebase Realtime Database**; slot claims and card redemptions must use **transactions**; team session + device token in `localStorage`.
 - Ask the owner for the Firebase web config at the start of M1 if not already in the file.
 - All display copy is **theme-neutral English** (no basketball/rookie/draft language) and the event name/labels come from `/config` (admin Event tab), never hardcoded.
