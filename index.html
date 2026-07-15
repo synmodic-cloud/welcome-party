@@ -317,6 +317,14 @@ h1, h2, h3 { font-family: var(--display); font-weight: 400; margin: 0; }
     <div style="text-align:center; margin-top:1rem;"><button id="scan-close" class="btn mini">Cancel</button></div>
   </div>
 </div>
+<div id="teamqr-modal" class="modal" hidden>
+  <div class="modal-card card" style="text-align:center;">
+    <h2 style="font-size:1.15rem;">Team device link</h2>
+    <div id="teamqr-screen" style="display:flex; justify-content:center; margin:1.2rem 0;"></div>
+    <p style="color:var(--muted); font-size:.9rem;">Each team keeper scans this with the team phone, then registers the team name. Show it to keepers only — don't project it.</p>
+    <button id="teamqr-close" class="btn mini">Close</button>
+  </div>
+</div>
 <div id="q-modal" class="modal" hidden>
   <div class="modal-card card">
     <span id="qm-station" class="q-badge"></span>
@@ -1089,7 +1097,7 @@ function renderRulesTab(panel) {
 /* ---- Codes & Printing: card set generation + the four print sheets (§10) ---- */
 const CARD_TYPES = ['Time Boost', 'Closer Line', 'Double Points', 'Silence'];
 const SAFE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; /* no 0/O, 1/I/L */
-const MISSIONS = [
+const DEFAULT_MISSIONS = [
   'Whole-team synchronized 5 jumping jacks',
   'A 10-second team cheer',
   'Spell "HKT" with your bodies',
@@ -1128,14 +1136,37 @@ function renderCodesTab(panel) {
     '<button id="pr-posters" class="btn mini"' + (activeQs.length ? '' : ' disabled') + '>🖨 Station posters</button>' +
     '<button id="pr-cards" class="btn mini"' + (codes.length ? '' : ' disabled') + '>🖨 Power-up cards</button>' +
     '<button id="pr-staff" class="btn mini"' + (codes.length ? '' : ' disabled') + '>🖨 Staff Master Sheet</button>' +
-    '<button id="pr-teamqr" class="btn mini">🖨 Team QR sheet (5×)</button></div>' +
+    '<button id="cp-teamqr" class="btn mini">📱 Show team QR on screen</button></div>' +
     '<p style="color:var(--muted); font-size:.83rem;">Posters carry no event name or year — laminate once, reuse every cohort. ' +
-    'Cards show only their ★ number; codes live on the Staff Master Sheet.</p>';
+    'Cards show only their ★ number; codes live on the Staff Master Sheet.</p>' +
+    '<hr style="margin:1.2rem 0; border:none; border-top:2px solid #F1EAF8;">' +
+    '<label class="field">Micro-missions for the Staff Master Sheet — one per line, assigned to cards in order' +
+    '<textarea id="cp-missions" class="input" rows="8" style="resize:vertical; margin-top:.3rem;">' +
+    esc((config.missions && config.missions.length ? config.missions : DEFAULT_MISSIONS).join('\n')) +
+    '</textarea></label>' +
+    '<button id="cp-missions-save" class="btn violet">Save missions</button>';
   document.getElementById('cc-gen').addEventListener('click', generateCardSet);
   document.getElementById('pr-posters').addEventListener('click', printStationPosters);
   document.getElementById('pr-cards').addEventListener('click', printPowerupCards);
   document.getElementById('pr-staff').addEventListener('click', printStaffSheet);
-  document.getElementById('pr-teamqr').addEventListener('click', printTeamQr);
+  document.getElementById('cp-teamqr').addEventListener('click', showTeamQrModal);
+  document.getElementById('cp-missions-save').addEventListener('click', () => {
+    const missions = document.getElementById('cp-missions').value
+      .split('\n').map((l) => l.trim()).filter(Boolean);
+    if (!missions.length) { adminToast('Add at least one mission.'); return; }
+    db.ref('config/missions').set(missions).then(() => adminToast(missions.length + ' missions saved ✓'));
+  });
+}
+
+/* On-screen team QR: host shows this to each keeper — replaces the printed sheet */
+function showTeamQrModal() {
+  const el = document.getElementById('teamqr-screen');
+  el.innerHTML = '';
+  new QRCode(el, {
+    text: location.origin + location.pathname,
+    width: 280, height: 280, correctLevel: QRCode.CorrectLevel.M,
+  });
+  document.getElementById('teamqr-modal').hidden = false;
 }
 
 function generateCardSet() {
@@ -1201,28 +1232,16 @@ function printPowerupCards() {
 
 function printStaffSheet() {
   const codes = Object.keys(adminCards).sort((a, b) => (adminCards[a].cardId || 0) - (adminCards[b].cardId || 0));
+  const missions = (config.missions && config.missions.length) ? config.missions : DEFAULT_MISSIONS;
   const rows = codes.map((c, i) => {
     const card = adminCards[c];
     return '<tr><td><b>★ ' + card.cardId + '</b></td><td><b>' + esc(c) + '</b></td>' +
-      '<td>' + esc(card.type) + '</td><td>' + esc(MISSIONS[i % MISSIONS.length]) + '</td></tr>';
+      '<td>' + esc(card.type) + '</td><td>' + esc(missions[i % missions.length]) + '</td></tr>';
   }).join('');
   runPrint('<div class="print-page"><h2>Staff Master Sheet — facilitators only 🤐</h2>' +
     '<p>Team completes the micro-mission → reveal that card\'s code. Each code works once.</p>' +
     '<table class="staff-table"><tr><th>Card</th><th>Secret code</th><th>Power-up</th><th>Suggested mission</th></tr>' +
     rows + '</table></div>', [], 'A4 portrait');
-}
-
-function printTeamQr() {
-  const url = location.origin + location.pathname;
-  const jobs = [];
-  let grid = '';
-  for (let i = 1; i <= 5; i++) {
-    jobs.push({ el: 'teamqr-' + i, text: url });
-    grid += '<div><div id="teamqr-' + i + '"></div><b>TEAM DEVICE ' + i + '</b><br>For the team keeper only</div>';
-  }
-  runPrint('<div class="print-page"><h2>Team device links</h2>' +
-    '<p>Hand one to each team keeper at team formation — do not project.</p>' +
-    '<div class="teamqr-grid">' + grid + '</div></div>', jobs, 'A4 portrait');
 }
 
 /* ---- Questions tab: 1:1 with station QRs; answers stored as salted hashes ---- */
@@ -1656,6 +1675,9 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('scan-btn').addEventListener('click', openScanner);
   document.getElementById('scan-close').addEventListener('click', stopScanner);
   document.getElementById('qm-close').addEventListener('click', closeQuestionModal);
+  document.getElementById('teamqr-close').addEventListener('click', () => {
+    document.getElementById('teamqr-modal').hidden = true;
+  });
   document.getElementById('card-go').addEventListener('click', () => {
     redeemCard(document.getElementById('card-code').value);
   });
