@@ -241,13 +241,21 @@ h1, h2, h3 { font-family: var(--display); font-weight: 400; margin: 0; }
   .poster-label { font-family: var(--display); font-size: 2.2rem; letter-spacing: .2em; }
   .poster-num { font-family: var(--display); font-size: 8rem; line-height: 1.05; }
   .poster-qr { margin: 1rem auto; }
-  .poster-qr img, .poster-qr canvas { width: 9cm !important; height: 9cm !important; }
-  .poster-hint { font-size: 1.3rem; font-weight: 700; color: #555; }
-  .pcard {
-    display: inline-block; width: 40%; margin: 1.5%; padding: 1.2cm .6cm;
-    border: 3px dashed #999; border-radius: 18px; vertical-align: top;
+  .poster-qr img, .poster-qr canvas {
+    width: 9cm !important; height: 9cm !important;
+    display: block !important; margin: 0 auto !important; /* centred on the page */
   }
-  .pcard .star { font-family: var(--display); font-size: 3.4rem; }
+  .poster-hint { font-size: 1.3rem; font-weight: 700; color: #555; }
+  /* power-up card: one A6 card per page */
+  .card-page { padding: 0; display: flex; align-items: center; justify-content: center; }
+  .pcard {
+    width: 9cm; height: 13cm; margin: 0 auto;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: .7cm; padding: .8cm;
+    border: 4px dashed #999; border-radius: 24px;
+    font-size: 1.25rem; font-weight: 700; text-align: center;
+  }
+  .pcard .star { font-family: var(--display); font-size: 4.6rem; line-height: 1; }
   .staff-table { width: 100%; border-collapse: collapse; font-size: .95rem; }
   .staff-table th, .staff-table td { border: 1px solid #888; padding: .45em .6em; text-align: left; }
   .teamqr-grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 1cm; }
@@ -290,13 +298,6 @@ h1, h2, h3 { font-family: var(--display); font-weight: 400; margin: 0; }
     </div>
     <div id="team-scramble" hidden>
       <button id="scan-btn" class="btn" style="width:100%; font-size:1.25rem; padding:1.1rem; margin-top:1.1rem;">📷 SCAN STATION</button>
-      <div style="text-align:center; margin-top:.5rem;">
-        <button id="manual-toggle" class="btn mini">Camera not working? Enter station number</button>
-      </div>
-      <div id="manual-row" class="row" hidden>
-        <input id="manual-station" class="input" type="number" placeholder="Station #" min="1" max="99">
-        <button id="manual-go" class="btn mini">Go</button>
-      </div>
       <div class="row" style="margin-top:1rem;">
         <input id="card-code" class="input" placeholder="Enter card code" maxlength="12" style="text-transform:uppercase;" autocomplete="off">
         <button id="card-go" class="btn mini">Claim</button>
@@ -609,11 +610,9 @@ function openScanner() {
     (text) => { stopScanner(); openStation(text); },
     () => {} /* per-frame decode misses — ignore */
   ).catch(() => {
-    /* camera denied/broken — the game never dies on this (SPEC §4.3) */
     stopScanner();
-    document.getElementById('manual-row').hidden = false;
     qmSetup('—');
-    qmMessage('Camera unavailable — type the station number instead.');
+    qmMessage('Camera unavailable — check the browser\'s camera permission, or ask the host to move your team to another phone.');
   });
 }
 
@@ -759,7 +758,7 @@ function redeemCard(raw) {
     if (!committed) { cardNotice('Already claimed — another team got this card first.'); return; }
     if (card && card.ghost) {
       db.ref('cards/' + code).remove(); /* we created a ghost — code doesn't exist */
-      cardNotice("Hmm, that code isn't right. Check with the referee.");
+      cardNotice("Hmm, that code isn't right. Check with the facilitator.");
       return;
     }
     db.ref('teams/' + myTeamId + '/powerups/' + code).set({ type: card.type, value: card.value ?? null });
@@ -1040,7 +1039,6 @@ function renderEventTab(panel) {
     '<label class="field">Subtitle / date line<input id="ev-subtitle" class="input" maxlength="80" value="' + esc(config.eventSubtitle) + '"></label>' +
     '<label class="field">Challenge 1 label<input id="ev-c1" class="input" maxlength="40" value="' + esc(config.labels.challenge1) + '"></label>' +
     '<label class="field">Challenge 2 label<input id="ev-c2" class="input" maxlength="40" value="' + esc(config.labels.challenge2) + '"></label>' +
-    '<label class="field-check"><input id="ev-sounds" type="checkbox"' + (config.sounds ? ' checked' : '') + '> Board sound effects</label>' +
     '<button id="ev-save" class="btn violet">Save</button>';
   document.getElementById('ev-save').addEventListener('click', () => {
     db.ref('config').update({
@@ -1050,7 +1048,6 @@ function renderEventTab(panel) {
         challenge1: document.getElementById('ev-c1').value.trim() || DEFAULT_CONFIG.labels.challenge1,
         challenge2: document.getElementById('ev-c2').value.trim() || DEFAULT_CONFIG.labels.challenge2,
       },
-      sounds: document.getElementById('ev-sounds').checked,
     }).then(() => adminToast('Saved — every screen updates live ✓'));
   });
 }
@@ -1159,9 +1156,17 @@ function generateCardSet() {
 }
 
 /* ---- Print helpers: fill #print-root, print, done ---- */
-function runPrint(html, qrJobs) {
+function runPrint(html, qrJobs, pageSize) {
   const root = document.getElementById('print-root');
   root.innerHTML = html;
+  /* per-sheet paper size: posters A5, cards A6, sheets A4 */
+  let style = document.getElementById('print-page-size');
+  if (!style) {
+    style = document.createElement('style');
+    style.id = 'print-page-size';
+    document.head.appendChild(style);
+  }
+  style.textContent = '@page { size: ' + (pageSize || 'A4 portrait') + '; margin: 0.6cm; }';
   (qrJobs || []).forEach((job) => {
     new QRCode(document.getElementById(job.el), {
       text: job.text, width: 320, height: 320, correctLevel: QRCode.CorrectLevel.M,
@@ -1182,20 +1187,16 @@ function printStationPosters() {
       '<div class="poster-qr" id="' + el + '"></div>' +
       '<div class="poster-hint">Scan this with your team device 📱</div></div>';
   }).join('');
-  runPrint(html, jobs);
+  runPrint(html, jobs, 'A5 portrait');
 }
 
 function printPowerupCards() {
   const codes = Object.keys(adminCards).sort((a, b) => (adminCards[a].cardId || 0) - (adminCards[b].cardId || 0));
-  const cards = codes.map((c) =>
-    '<div class="pcard">✨ POWER-UP CARD' +
+  const pages = codes.map((c) =>
+    '<div class="print-page card-page"><div class="pcard">✨ POWER-UP CARD' +
     '<div class="star">★ ' + adminCards[c].cardId + '</div>' +
-    '<div>Bring this card to a referee to unlock</div></div>');
-  const pages = [];
-  for (let i = 0; i < cards.length; i += 4) {
-    pages.push('<div class="print-page">' + cards.slice(i, i + 4).join('') + '</div>');
-  }
-  runPrint(pages.join(''), []);
+    '<div>Bring it to the facilitator to unlock</div></div></div>');
+  runPrint(pages.join(''), [], 'A6 portrait');
 }
 
 function printStaffSheet() {
@@ -1205,10 +1206,10 @@ function printStaffSheet() {
     return '<tr><td><b>★ ' + card.cardId + '</b></td><td><b>' + esc(c) + '</b></td>' +
       '<td>' + esc(card.type) + '</td><td>' + esc(MISSIONS[i % MISSIONS.length]) + '</td></tr>';
   }).join('');
-  runPrint('<div class="print-page"><h2>Staff Master Sheet — referees only 🤐</h2>' +
+  runPrint('<div class="print-page"><h2>Staff Master Sheet — facilitators only 🤐</h2>' +
     '<p>Team completes the micro-mission → reveal that card\'s code. Each code works once.</p>' +
     '<table class="staff-table"><tr><th>Card</th><th>Secret code</th><th>Power-up</th><th>Suggested mission</th></tr>' +
-    rows + '</table></div>', []);
+    rows + '</table></div>', [], 'A4 portrait');
 }
 
 function printTeamQr() {
@@ -1221,7 +1222,7 @@ function printTeamQr() {
   }
   runPrint('<div class="print-page"><h2>Team device links</h2>' +
     '<p>Hand one to each team keeper at team formation — do not project.</p>' +
-    '<div class="teamqr-grid">' + grid + '</div></div>', jobs);
+    '<div class="teamqr-grid">' + grid + '</div></div>', jobs, 'A4 portrait');
 }
 
 /* ---- Questions tab: 1:1 with station QRs; answers stored as salted hashes ---- */
@@ -1655,14 +1656,6 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('scan-btn').addEventListener('click', openScanner);
   document.getElementById('scan-close').addEventListener('click', stopScanner);
   document.getElementById('qm-close').addEventListener('click', closeQuestionModal);
-  document.getElementById('manual-toggle').addEventListener('click', () => {
-    const row = document.getElementById('manual-row');
-    row.hidden = !row.hidden;
-  });
-  document.getElementById('manual-go').addEventListener('click', () => {
-    const v = document.getElementById('manual-station').value;
-    if (v) { openStation(v); document.getElementById('manual-station').value = ''; }
-  });
   document.getElementById('card-go').addEventListener('click', () => {
     redeemCard(document.getElementById('card-code').value);
   });
