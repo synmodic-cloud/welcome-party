@@ -208,11 +208,51 @@ h1, h2, h3 { font-family: var(--display); font-weight: 400; margin: 0; }
 #pin-form { max-width: 340px; margin: 14vh auto 0; text-align: center; }
 #pin-form .input { text-align: center; letter-spacing: .4em; font-size: 1.4rem; }
 
+/* ---------- BLIND SHOT (board stage + silence banner) ---------- */
+#board-stage .bb-name { font-family: var(--display); font-size: clamp(2rem, 6vw, 5rem); }
+#board-stage .bb-clock { font-family: var(--display); font-size: clamp(4rem, 14vw, 11rem); line-height: 1; }
+#board-stage .bb-tally { font-family: var(--display); font-size: clamp(2.4rem, 7vw, 6rem); }
+.bb-badge {
+  display: inline-block; background: var(--sunny); color: #6B4E00;
+  font-weight: 800; border-radius: 999px; padding: .3em .9em;
+  margin: .2em; font-size: clamp(.9rem, 2vw, 1.5rem);
+}
+#silence-banner {
+  position: fixed; inset: 0; z-index: 30;
+  background: var(--violet); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--display); font-size: clamp(1.6rem, 5vw, 4rem);
+  text-align: center; padding: 2rem; opacity: .96;
+}
+/* host blind console */
+.bs-btn-row { display: flex; gap: .6rem; flex-wrap: wrap; margin: 1rem 0; }
+.bs-big { font-size: 1.3rem; padding: 1rem 1.6rem; }
+
 /* ======================================================================
-   PRINT  (station posters / cards / staff sheet — built in a later step)
+   PRINT — station posters / power-up cards / staff sheet / team QR
+   All print-styled views inside this one page (SPEC.md §10)
    ====================================================================== */
+#print-root { display: none; }
 @media print {
-  #offline-pill { display: none; }
+  body > *:not(#print-root) { display: none !important; }
+  #offline-pill, #admin-toast { display: none !important; }
+  #print-root { display: block; }
+  .print-page { page-break-after: always; text-align: center; padding: 1.2cm; }
+  .poster-label { font-family: var(--display); font-size: 2.2rem; letter-spacing: .2em; }
+  .poster-num { font-family: var(--display); font-size: 8rem; line-height: 1.05; }
+  .poster-qr { margin: 1rem auto; }
+  .poster-qr img, .poster-qr canvas { width: 9cm !important; height: 9cm !important; }
+  .poster-hint { font-size: 1.3rem; font-weight: 700; color: #555; }
+  .pcard {
+    display: inline-block; width: 40%; margin: 1.5%; padding: 1.2cm .6cm;
+    border: 3px dashed #999; border-radius: 18px; vertical-align: top;
+  }
+  .pcard .star { font-family: var(--display); font-size: 3.4rem; }
+  .staff-table { width: 100%; border-collapse: collapse; font-size: .95rem; }
+  .staff-table th, .staff-table td { border: 1px solid #888; padding: .45em .6em; text-align: left; }
+  .teamqr-grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 1cm; }
+  .teamqr-grid > div { text-align: center; }
+  .teamqr-grid img, .teamqr-grid canvas { width: 6cm !important; height: 6cm !important; }
 }
 </style>
 </head>
@@ -296,7 +336,11 @@ h1, h2, h3 { font-family: var(--display); font-weight: 400; margin: 0; }
   <div id="board-waiting">Waiting for teams to join…</div>
   <ul id="board-team-list"></ul>
   <div id="board-ticker"></div>
+  <div id="silence-banner" hidden>🤫 SILENCE — no distractions for this shot</div>
 </section>
+
+<!-- Print-only container: filled on demand, hidden on screen (SPEC.md §10) -->
+<div id="print-root"></div>
 
 <!-- ====================================================================
      HOST VIEW  —  #/host · PIN-gated console (7 tabs)
@@ -528,10 +572,13 @@ function renderTeamStatus() {
   const el = document.getElementById('team-status');
   if (!el || document.getElementById('team-joined').hidden) return;
   const phase = config.phase || 'setup';
+  const myBaskets = myTeamData && myTeamData.baskets;
   el.textContent =
     phase === 'scramble' ? config.labels.challenge1 + ' is on — go hunt!' :
-    phase === 'blindshot' ? 'Wallet locked — it’s ' + config.labels.challenge2 + ' time.' :
-    phase === 'results' ? 'Game over — eyes on the big screen!' :
+    phase === 'blindshot' ? 'Wallet locked — it’s ' + config.labels.challenge2 + ' time.' +
+      (myBaskets != null ? ' You scored 🏀 ' + myBaskets + '!' : '') :
+    phase === 'results' ? (myBaskets != null ? 'Final score: 🏀 ' + myBaskets + ' baskets. ' : '') +
+      'Eyes on the big screen!' :
     'You’re in! Waiting for the game to begin…';
   document.getElementById('team-scramble').hidden = (phase !== 'scramble');
 }
@@ -740,7 +787,8 @@ function renderBoardPhase() {
       '<div id="board-clock" class="board-clock"></div>';
     updateBoardClock();
   } else if (phase === 'blindshot') {
-    el.innerHTML = '<div class="board-challenge">' + esc(config.labels.challenge2) + '</div>';
+    el.innerHTML = '<div class="board-challenge">' + esc(config.labels.challenge2) + '</div><div id="board-stage"></div>';
+    renderBoardStage();
   } else if (phase === 'results') {
     el.innerHTML = '<div class="board-challenge">Final results</div>';
     if (renderBoardPhase._last !== 'results' && currentView() === 'board' && typeof confetti !== 'undefined') {
@@ -760,6 +808,13 @@ function updateBoardClock() {
   if (el) el.textContent = scrambleLive ? fmt : '';
   const tEl = document.getElementById('team-clock');
   if (tEl) tEl.textContent = scrambleLive ? (remain > 0 ? 'Time left  ' + fmt : "Time's up!") : '';
+  /* blind shot clocks (board stage + host console) */
+  const bb = document.getElementById('bb-clock');
+  if (bb) bb.textContent = fmtSecs(blindRemainMs(activeBlindTurn()));
+  const bs = document.getElementById('bs-clock');
+  if (bs && blindSelectedId && adminBlind[blindSelectedId]) {
+    bs.textContent = fmtSecs(blindRemainMs(adminBlind[blindSelectedId]));
+  }
 }
 
 let boardTeams = {};
@@ -790,8 +845,26 @@ function renderBoardTeams() {
       : 'Waiting for teams to join…';
     return;
   }
-  /* live leaderboard: banked time, then stations cleared, then join order */
   waiting.textContent = teams.length ? '' : 'No teams registered.';
+  if (phase === 'blindshot' || phase === 'results') {
+    /* baskets standings — tiebreak: Scramble bonus earned (SPEC §7), then join order */
+    const medals = ['🥇', '🥈', '🥉'];
+    teams.sort((a, b) =>
+      (b.baskets ?? -1) - (a.baskets ?? -1) ||
+      (b.bonusSec || 0) - (a.bonusSec || 0) ||
+      (a.joinedAt || 0) - (b.joinedAt || 0)
+    ).forEach((t, i) => {
+      const li = document.createElement('li');
+      li.className = 'lb-row';
+      li.innerHTML = '<span class="lb-rank">' + (phase === 'results' ? (medals[i] || (i + 1)) : (i + 1)) + '</span>' +
+        '<span style="color:' + esc(t.colour) + '">' + esc(t.name) + '</span>' +
+        '<span class="lb-stats">' + (t.baskets != null ? '🏀 ' + t.baskets : 'yet to shoot') +
+        ' · ' + (t.bonusSec || 0) + 's banked</span>';
+      ul.appendChild(li);
+    });
+    return;
+  }
+  /* scramble leaderboard: banked time, then stations cleared, then join order */
   teams.sort((a, b) =>
     (b.bonusSec || 0) - (a.bonusSec || 0) ||
     Object.keys(b.cleared || {}).length - Object.keys(a.cleared || {}).length ||
@@ -806,6 +879,37 @@ function renderBoardTeams() {
       (t.bonusSec || 0) + 's' + (cards ? ' · 🎴' + cards : '') + '</span>';
     ul.appendChild(li);
   });
+}
+
+/* Blind Shot stage: giant countdown, tally, card badges, silence banner */
+let boardBlind = {};
+
+function watchBoardBlind() {
+  if (!db) return;
+  db.ref('blindshot').on('value', (snap) => {
+    boardBlind = snap.val() || {};
+    if ((config.phase || 'setup') === 'blindshot') renderBoardStage();
+    renderBoardTeams();
+  });
+}
+
+function activeBlindTurn() {
+  return Object.values(boardBlind).find((b) => b.status === 'running' || b.status === 'paused') || null;
+}
+
+function renderBoardStage() {
+  const el = document.getElementById('board-stage');
+  if (!el) return;
+  const b = activeBlindTurn();
+  document.getElementById('silence-banner').hidden =
+    !(b && b.status === 'running' && (b.playedCards || []).some((c) => c.type === 'Silence'));
+  if (!b) { el.innerHTML = ''; return; }
+  el.innerHTML =
+    '<div class="bb-name" style="color:' + esc(b.colour || 'inherit') + '">' + esc(b.teamName || '') + '</div>' +
+    '<div class="bb-clock" id="bb-clock">' + fmtSecs(blindRemainMs(b)) + '</div>' +
+    '<div class="bb-tally">🏀 ' + (b.baskets || 0) + '</div>' +
+    (b.playedCards || []).map((c) => '<span class="bb-badge">' + esc(c.type) + '</span>').join('') +
+    (b.status === 'paused' ? '<div style="font-weight:800; color:var(--muted); margin-top:1vh;">⏸ PAUSED</div>' : '');
 }
 
 /* Ticker: board strip shows the newest event; team view mirrors it */
@@ -840,6 +944,8 @@ function handlePinSubmit(e) {
 let activeTab = 'Event';
 let adminTeams = {};
 let adminQuestions = {};
+let adminCards = {};
+let adminBlind = {};
 let adminSubsStarted = false;
 let questionEditorOpen = false;
 
@@ -857,11 +963,19 @@ function startAdminSubscriptions() {
   adminSubsStarted = true;
   db.ref('teams').on('value', (s) => {
     adminTeams = s.val() || {};
-    if (activeTab === 'Live Control' || activeTab === 'Data') renderHostPanel();
+    if (['Live Control', 'Data', 'Blind Shot'].includes(activeTab)) renderHostPanel();
   });
   db.ref('questions').on('value', (s) => {
     adminQuestions = s.val() || {};
     if (activeTab === 'Questions' && !questionEditorOpen) renderHostPanel();
+  });
+  db.ref('cards').on('value', (s) => {
+    adminCards = s.val() || {};
+    if (activeTab === 'Codes & Printing') renderHostPanel();
+  });
+  db.ref('blindshot').on('value', (s) => {
+    adminBlind = s.val() || {};
+    if (activeTab === 'Blind Shot') renderHostPanel();
   });
 }
 
@@ -893,10 +1007,10 @@ function renderHostPanel() {
   if (activeTab === 'Event') renderEventTab(panel);
   else if (activeTab === 'Questions') renderQuestionsTab(panel);
   else if (activeTab === 'Rules') renderRulesTab(panel);
+  else if (activeTab === 'Codes & Printing') renderCodesTab(panel);
   else if (activeTab === 'Live Control') renderLiveControlTab(panel);
+  else if (activeTab === 'Blind Shot') renderBlindTab(panel);
   else if (activeTab === 'Data') renderDataTab(panel);
-  else panel.innerHTML = '<h3 class="panel-title">' + activeTab + '</h3>' +
-    '<p style="color:var(--muted);">Built in a later step.</p>';
 }
 
 /* Small helpers shared by the admin tabs */
@@ -973,6 +1087,141 @@ function renderRulesTab(panel) {
       hostPin: document.getElementById('ru-pin').value.trim() || '1234',
     }).then(() => adminToast('Rules saved ✓'));
   });
+}
+
+/* ---- Codes & Printing: card set generation + the four print sheets (§10) ---- */
+const CARD_TYPES = ['Time Boost', 'Closer Line', 'Double Points', 'Silence'];
+const SAFE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; /* no 0/O, 1/I/L */
+const MISSIONS = [
+  'Whole-team synchronized 5 jumping jacks',
+  'A 10-second team cheer',
+  'Spell "HKT" with your bodies',
+  'Make a human tunnel — everyone passes through',
+  '6-person high-five chain',
+  'Group freeze-frame "victory pose"',
+  'Hum a song until the referee guesses it',
+  '10 team passes without dropping',
+];
+
+function genCardCode(existing) {
+  let code;
+  do {
+    code = 'GOLD-';
+    for (let i = 0; i < 4; i++) code += SAFE_ALPHABET[Math.floor(Math.random() * SAFE_ALPHABET.length)];
+  } while (existing[code]);
+  return code;
+}
+
+function renderCodesTab(panel) {
+  const codes = Object.keys(adminCards);
+  const redeemed = codes.filter((c) => adminCards[c].redeemedBy).length;
+  const activeQs = Object.keys(adminQuestions).filter((id) => adminQuestions[id].active !== false).sort();
+  panel.innerHTML =
+    '<h3 class="panel-title">Codes & Printing</h3>' +
+    '<p style="color:var(--muted); font-size:.9rem;">Cards: ' +
+    (codes.length ? codes.length + ' generated · ' + redeemed + ' redeemed' : 'none generated yet') +
+    ' &nbsp;·&nbsp; Station posters follow your active questions (' + activeQs.length + ').</p>' +
+    '<div style="display:flex; gap:.8rem; flex-wrap:wrap; align-items:end;">' +
+    CARD_TYPES.map((t, i) =>
+      '<label class="field" style="margin:0;">' + t +
+      '<input id="cc-' + i + '" class="input mini-num" type="number" min="0" max="9" value="2"></label>').join('') +
+    '<button id="cc-gen" class="btn violet">Generate card set</button></div>' +
+    '<hr style="margin:1.2rem 0; border:none; border-top:2px solid #F1EAF8;">' +
+    '<div class="bs-btn-row">' +
+    '<button id="pr-posters" class="btn mini"' + (activeQs.length ? '' : ' disabled') + '>🖨 Station posters</button>' +
+    '<button id="pr-cards" class="btn mini"' + (codes.length ? '' : ' disabled') + '>🖨 Power-up cards</button>' +
+    '<button id="pr-staff" class="btn mini"' + (codes.length ? '' : ' disabled') + '>🖨 Staff Master Sheet</button>' +
+    '<button id="pr-teamqr" class="btn mini">🖨 Team QR sheet (5×)</button></div>' +
+    '<p style="color:var(--muted); font-size:.83rem;">Posters carry no event name or year — laminate once, reuse every cohort. ' +
+    'Cards show only their ★ number; codes live on the Staff Master Sheet.</p>';
+  document.getElementById('cc-gen').addEventListener('click', generateCardSet);
+  document.getElementById('pr-posters').addEventListener('click', printStationPosters);
+  document.getElementById('pr-cards').addEventListener('click', printPowerupCards);
+  document.getElementById('pr-staff').addEventListener('click', printStaffSheet);
+  document.getElementById('pr-teamqr').addEventListener('click', printTeamQr);
+}
+
+function generateCardSet() {
+  const counts = CARD_TYPES.map((t, i) => parseInt(document.getElementById('cc-' + i).value, 10) || 0);
+  const total = counts.reduce((a, b) => a + b, 0);
+  if (!total) { adminToast('Set at least one card.'); return; }
+  if (Object.keys(adminCards).length &&
+      !confirm('Replace the current card set? Old codes (and any redemptions) are wiped.')) return;
+  const set = {};
+  let cardId = 0;
+  CARD_TYPES.forEach((type, i) => {
+    for (let k = 0; k < counts[i]; k++) {
+      cardId += 1;
+      set[genCardCode(set)] = { type: type, value: type === 'Time Boost' ? 30 : null, cardId: cardId };
+    }
+  });
+  db.ref('cards').set(set).then(() => adminToast(total + ' cards generated ✓'));
+}
+
+/* ---- Print helpers: fill #print-root, print, done ---- */
+function runPrint(html, qrJobs) {
+  const root = document.getElementById('print-root');
+  root.innerHTML = html;
+  (qrJobs || []).forEach((job) => {
+    new QRCode(document.getElementById(job.el), {
+      text: job.text, width: 320, height: 320, correctLevel: QRCode.CorrectLevel.M,
+    });
+  });
+  setTimeout(() => window.print(), 350); /* let QR canvases render first */
+}
+
+function printStationPosters() {
+  const ids = Object.keys(adminQuestions).filter((id) => adminQuestions[id].active !== false).sort();
+  const jobs = [];
+  const html = ids.map((id) => {
+    const el = 'poster-qr-' + id;
+    jobs.push({ el: el, text: 'GA-' + id });
+    return '<div class="print-page">' +
+      '<div class="poster-label">STATION</div>' +
+      '<div class="poster-num">' + stationNum(id) + '</div>' +
+      '<div class="poster-qr" id="' + el + '"></div>' +
+      '<div class="poster-hint">Scan this with your team device 📱</div></div>';
+  }).join('');
+  runPrint(html, jobs);
+}
+
+function printPowerupCards() {
+  const codes = Object.keys(adminCards).sort((a, b) => (adminCards[a].cardId || 0) - (adminCards[b].cardId || 0));
+  const cards = codes.map((c) =>
+    '<div class="pcard">✨ POWER-UP CARD' +
+    '<div class="star">★ ' + adminCards[c].cardId + '</div>' +
+    '<div>Bring this card to a referee to unlock</div></div>');
+  const pages = [];
+  for (let i = 0; i < cards.length; i += 4) {
+    pages.push('<div class="print-page">' + cards.slice(i, i + 4).join('') + '</div>');
+  }
+  runPrint(pages.join(''), []);
+}
+
+function printStaffSheet() {
+  const codes = Object.keys(adminCards).sort((a, b) => (adminCards[a].cardId || 0) - (adminCards[b].cardId || 0));
+  const rows = codes.map((c, i) => {
+    const card = adminCards[c];
+    return '<tr><td><b>★ ' + card.cardId + '</b></td><td><b>' + esc(c) + '</b></td>' +
+      '<td>' + esc(card.type) + '</td><td>' + esc(MISSIONS[i % MISSIONS.length]) + '</td></tr>';
+  }).join('');
+  runPrint('<div class="print-page"><h2>Staff Master Sheet — referees only 🤐</h2>' +
+    '<p>Team completes the micro-mission → reveal that card\'s code. Each code works once.</p>' +
+    '<table class="staff-table"><tr><th>Card</th><th>Secret code</th><th>Power-up</th><th>Suggested mission</th></tr>' +
+    rows + '</table></div>', []);
+}
+
+function printTeamQr() {
+  const url = location.origin + location.pathname;
+  const jobs = [];
+  let grid = '';
+  for (let i = 1; i <= 5; i++) {
+    jobs.push({ el: 'teamqr-' + i, text: url });
+    grid += '<div><div id="teamqr-' + i + '"></div><b>TEAM DEVICE ' + i + '</b><br>For the team keeper only</div>';
+  }
+  runPrint('<div class="print-page"><h2>Team device links</h2>' +
+    '<p>Hand one to each team keeper at team formation — do not project.</p>' +
+    '<div class="teamqr-grid">' + grid + '</div></div>', jobs);
 }
 
 /* ---- Questions tab: 1:1 with station QRs; answers stored as salted hashes ---- */
@@ -1219,6 +1468,135 @@ function renderLiveControlTab(panel) {
   });
 }
 
+/* ---- Blind Shot console: arm cards, run the turn, count baskets (§7) ---- */
+let blindSelectedId = null;
+let blindHistory = [];   /* local +1/+2 stack for Undo */
+
+function blindRemainMs(b) {
+  if (!b) return 0;
+  if (b.status === 'running') return Math.max(0, b.endsAt - Date.now());
+  return Math.max(0, b.remainMs || 0);
+}
+
+function fmtSecs(ms) {
+  const s = Math.ceil(ms / 1000);
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
+
+function renderBlindTab(panel) {
+  const ids = Object.keys(adminTeams).sort((a, b) => (adminTeams[a].joinedAt || 0) - (adminTeams[b].joinedAt || 0));
+  if (!ids.length) {
+    panel.innerHTML = '<h3 class="panel-title">Blind Shot</h3><p style="color:var(--muted);">No teams registered yet.</p>';
+    return;
+  }
+  if (!blindSelectedId || !adminTeams[blindSelectedId]) {
+    /* team picker */
+    panel.innerHTML = '<h3 class="panel-title">Blind Shot — pick the shooting team</h3>' +
+      ids.map((id) => {
+        const t = adminTeams[id];
+        const b = adminBlind[id];
+        const state = b ? (b.status === 'done' ? '✅ ' + (b.baskets || 0) + ' baskets' : '▶ turn in progress') : (t.bonusSec || 0) + 's banked';
+        return '<div class="lc-row"><span class="team-dot" style="background:' + esc(t.colour) + '"></span>' +
+          '<b>' + esc(t.name) + '</b><span style="color:var(--muted); font-size:.85rem;">' + state + '</span>' +
+          '<span class="q-actions"><button class="btn mini" data-bs="' + id + '">' + (b && b.status === 'done' ? 'Re-run' : 'Run turn') + '</button></span></div>';
+      }).join('');
+    panel.querySelectorAll('[data-bs]').forEach((btn) => btn.addEventListener('click', () => {
+      blindSelectedId = btn.dataset.bs;
+      blindHistory = [];
+      renderHostPanel();
+    }));
+    return;
+  }
+
+  /* selected team console */
+  const id = blindSelectedId;
+  const t = adminTeams[id];
+  const b = adminBlind[id];
+  const unusedCards = Object.entries(t.powerups || {}).filter(([, c]) => !c.used);
+  let html = '<h3 class="panel-title">Blind Shot — <span style="color:' + esc(t.colour) + '">' + esc(t.name) + '</span></h3>';
+
+  if (!b || b.status === 'done') {
+    /* pre-turn: arm cards, show computed total */
+    html += '<p>Base ' + (config.blindBaseSec || 120) + 's + banked ' + (t.bonusSec || 0) + 's' +
+      ' <span id="bs-boost"></span> = <b id="bs-total"></b></p>';
+    html += unusedCards.length
+      ? '<p style="font-weight:700;">Arm cards for this turn:</p>' + unusedCards.map(([code, c]) =>
+          '<label class="field-check" style="margin:.3rem 0;"><input type="checkbox" class="bs-arm" data-code="' + esc(code) + '" data-type="' + esc(c.type) + '" data-value="' + (c.value || 0) + '"> ' +
+          esc(c.type) + (c.type === 'Time Boost' ? ' (+' + (c.value || 30) + 's)' : '') + '</label>').join('')
+      : '<p style="color:var(--muted);">No unused cards in this team\'s wallet.</p>';
+    html += '<div class="bs-btn-row"><button id="bs-start" class="btn violet bs-big">▶ Start</button>' +
+      '<button id="bs-back" class="btn mini">Back to teams</button></div>';
+    panel.innerHTML = html;
+    const updateTotal = () => {
+      const boost = [...panel.querySelectorAll('.bs-arm:checked')]
+        .filter((c) => c.dataset.type === 'Time Boost')
+        .reduce((sum, c) => sum + (parseInt(c.dataset.value, 10) || 30), 0);
+      document.getElementById('bs-boost').textContent = boost ? '+ boost ' + boost + 's' : '';
+      document.getElementById('bs-total').textContent =
+        ((config.blindBaseSec || 120) + (t.bonusSec || 0) + boost) + 's total';
+    };
+    updateTotal();
+    panel.querySelectorAll('.bs-arm').forEach((c) => c.addEventListener('change', updateTotal));
+    document.getElementById('bs-back').addEventListener('click', () => { blindSelectedId = null; renderHostPanel(); });
+    document.getElementById('bs-start').addEventListener('click', () => {
+      const armed = [...panel.querySelectorAll('.bs-arm:checked')].map((c) => ({
+        code: c.dataset.code, type: c.dataset.type, value: parseInt(c.dataset.value, 10) || null,
+      }));
+      const totalSec = (config.blindBaseSec || 120) + (t.bonusSec || 0) +
+        armed.filter((c) => c.type === 'Time Boost').reduce((s, c) => s + (c.value || 30), 0);
+      blindHistory = [];
+      armed.forEach((c) => db.ref('teams/' + id + '/powerups/' + c.code + '/used').set(true));
+      db.ref('blindshot/' + id).set({
+        status: 'running', endsAt: Date.now() + totalSec * 1000, totalSec: totalSec,
+        baskets: 0, playedCards: armed, teamName: t.name, colour: t.colour,
+      });
+      pushFeed(t.name + ' steps up — ' + totalSec + 's on the clock!');
+    });
+    return;
+  }
+
+  /* mid-turn console */
+  const paused = b.status === 'paused';
+  html += '<p style="font-family:var(--display); font-size:2.2rem; margin:.4rem 0;"><span id="bs-clock">' + fmtSecs(blindRemainMs(b)) + '</span>' +
+    ' · 🏀 ' + (b.baskets || 0) + '</p>' +
+    (b.playedCards || []).map((c) => '<span class="bb-badge">' + esc(c.type) + '</span>').join('') +
+    '<div class="bs-btn-row">' +
+    '<button id="bs-plus1" class="btn violet bs-big">+1 basket</button>' +
+    ((b.playedCards || []).some((c) => c.type === 'Double Points')
+      ? '<button id="bs-plus2" class="btn bs-big">+2 (double)</button>' : '') +
+    '<button id="bs-undo" class="btn mini">Undo last</button></div>' +
+    '<div class="bs-btn-row">' +
+    '<button id="bs-pause" class="btn mini">' + (paused ? 'Resume' : 'Pause') + '</button>' +
+    '<button id="bs-end" class="btn danger">End turn</button></div>';
+  panel.innerHTML = html;
+  const addBaskets = (n) => {
+    blindHistory.push(n);
+    db.ref('blindshot/' + id + '/baskets').transaction((v) => (v || 0) + n);
+  };
+  document.getElementById('bs-plus1').addEventListener('click', () => addBaskets(1));
+  const p2 = document.getElementById('bs-plus2');
+  if (p2) p2.addEventListener('click', () => addBaskets(2));
+  document.getElementById('bs-undo').addEventListener('click', () => {
+    if (!blindHistory.length) return;
+    const n = blindHistory.pop();
+    db.ref('blindshot/' + id + '/baskets').transaction((v) => Math.max(0, (v || 0) - n));
+  });
+  document.getElementById('bs-pause').addEventListener('click', () => {
+    if (paused) {
+      db.ref('blindshot/' + id).update({ status: 'running', endsAt: Date.now() + (b.remainMs || 0), remainMs: null });
+    } else {
+      db.ref('blindshot/' + id).update({ status: 'paused', remainMs: Math.max(0, b.endsAt - Date.now()), endsAt: null });
+    }
+  });
+  document.getElementById('bs-end').addEventListener('click', () => {
+    if (!confirm('End ' + t.name + "'s turn at " + (b.baskets || 0) + ' baskets?')) return;
+    db.ref('blindshot/' + id).update({ status: 'done', endsAt: null, remainMs: null });
+    db.ref('teams/' + id + '/baskets').set(b.baskets || 0);
+    pushFeed(t.name + ' scored ' + (b.baskets || 0) + ' baskets!');
+    blindSelectedId = null;
+  });
+}
+
 /* ---- Data tab: raw state + CSV export (SPEC.md §9) ---- */
 function renderDataTab(panel) {
   panel.innerHTML = '<h3 class="panel-title">Data</h3>' +
@@ -1241,7 +1619,7 @@ function exportCsv() {
       t.name, t.colour, t.bonusSec || 0,
       Object.keys(t.cleared || {}).length,
       Object.keys(t.powerups || {}).length,
-      '', /* baskets — filled once Blind Shot is built */
+      t.baskets ?? '',
     ]));
   const csv = rows.map((r) => r.map((v) => '"' + String(v).replace(/"/g, '""') + '"').join(',')).join('\n');
   const a = document.createElement('a');
@@ -1269,6 +1647,7 @@ window.addEventListener('DOMContentLoaded', () => {
   if (sessionStorage.getItem('sbHostOk') === '1') showHostConsole();
   restoreTeamSession();
   watchBoardTeams();
+  watchBoardBlind();
   startFeedWatch();
   renderBoardPhase();
   setInterval(updateBoardClock, 1000);
