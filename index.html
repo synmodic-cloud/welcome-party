@@ -10,7 +10,7 @@
      ====================================================================== -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Archivo+Black&family=Plus+Jakarta+Sans:wght@400;600;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600&family=Bebas+Neue&family=Archivo+Black&family=Plus+Jakarta+Sans:wght@400;600;800&display=swap" rel="stylesheet">
 <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <script defer src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
@@ -46,7 +46,10 @@
   --mint:   #4ADE80;
   --radius: 16px;
   --shadow: none;
-  --display: 'Bebas Neue', 'Arial Narrow', sans-serif;
+  /* Oswald keeps true lowercase (brand names like "xBU" must not be
+     capitalised); Bebas Neue is digits-only duty on clocks & tallies */
+  --display: 'Oswald', 'Arial Narrow', sans-serif;
+  --digits:  'Bebas Neue', 'Oswald', sans-serif;
   --body:    'Plus Jakarta Sans', sans-serif;
 }
 
@@ -60,10 +63,10 @@ body {
 }
 h1, h2, h3 {
   font-family: var(--display);
-  font-weight: 400;
+  font-weight: 600;
   margin: 0;
-  letter-spacing: .03em;
-  text-transform: uppercase;
+  letter-spacing: .02em;
+  /* no text-transform — brand casing like "xBU" must render as written */
 }
 [hidden] { display: none !important; }
 :focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
@@ -170,7 +173,7 @@ h1, h2, h3 {
   border-radius: 12px; padding: .8rem .3rem;
 }
 .wallet-stat b {
-  display: block; font-family: var(--display);
+  display: block; font-family: var(--digits);
   font-size: 2rem; line-height: 1.05;
   font-variant-numeric: tabular-nums; letter-spacing: .02em;
 }
@@ -197,7 +200,7 @@ h1, h2, h3 {
 .qm-opt:disabled { opacity: .5; }
 .row { display: flex; gap: .5rem; margin-top: .6rem; }
 #team-clock {
-  text-align: center; font-family: var(--display);
+  text-align: center; font-family: var(--digits);
   font-size: 1.7rem; margin-top: .9rem;
   color: var(--amber); font-variant-numeric: tabular-nums;
 }
@@ -282,9 +285,9 @@ h1, h2, h3 {
   background: var(--amber); color: var(--night); font-weight: 700; font-size: .9rem;
   padding: .6rem 1.2rem; border-radius: 12px; z-index: 60;
 }
-.board-challenge { font-family: var(--display); font-size: clamp(1.8rem, 4.4vw, 3.8rem); margin-top: 3vh; }
+.board-challenge { font-family: var(--display); font-size: clamp(1.8rem, 4.4vw, 3.8rem); margin-top: 3vh; text-transform: uppercase; }
 .board-clock {
-  font-family: var(--display); font-size: clamp(3.4rem, 11vw, 9rem);
+  font-family: var(--digits); font-size: clamp(3.4rem, 11vw, 9rem);
   color: var(--amber); font-variant-numeric: tabular-nums;
   text-shadow: 0 0 34px rgba(245, 169, 66, .35);
 }
@@ -310,11 +313,11 @@ h1, h2, h3 {
 /* ---------- NIGHT RUSH (board stage + silence banner) ---------- */
 #board-stage .bb-name { font-family: var(--display); font-size: clamp(2.2rem, 6.5vw, 5.5rem); }
 #board-stage .bb-clock {
-  font-family: var(--display); font-size: clamp(4.4rem, 15vw, 12rem); line-height: 1;
+  font-family: var(--digits); font-size: clamp(4.4rem, 15vw, 12rem); line-height: 1;
   color: var(--amber); font-variant-numeric: tabular-nums;
   text-shadow: 0 0 44px rgba(245, 169, 66, .4);
 }
-#board-stage .bb-tally { font-family: var(--display); font-size: clamp(2.6rem, 7.5vw, 6.5rem); }
+#board-stage .bb-tally { font-family: var(--digits); font-size: clamp(2.6rem, 7.5vw, 6.5rem); }
 .bb-badge {
   display: inline-block; color: var(--amber);
   border: 1px solid var(--amber); background: rgba(8, 28, 38, .5);
@@ -326,6 +329,7 @@ h1, h2, h3 {
   background: var(--night); color: var(--amber);
   display: flex; align-items: center; justify-content: center;
   font-family: var(--display); font-size: clamp(1.8rem, 5.5vw, 4.4rem);
+  text-transform: uppercase;
   text-align: center; padding: 2rem; opacity: .97;
 }
 /* host blind console — oversized live controls */
@@ -548,8 +552,11 @@ function initFirebase() {
     renderBoardTeams();
     renderTeamStatus();
     updateBoardClock();
-    /* keep the phase highlight in Live Control current */
-    if (adminSubsStarted && activeTab === 'Live Control') renderHostPanel();
+    /* keep tab names + the phase highlight in Live Control current */
+    if (adminSubsStarted) {
+      renderHostTabs();
+      if (activeTab === 'Live Control') renderHostPanel();
+    }
   });
 }
 
@@ -1142,7 +1149,8 @@ function renderHostTabs() {
   HOST_TABS.forEach((label) => {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.textContent = label;
+    /* 'Blind Shot' stays the internal key; the visible text follows the admin-set label */
+    btn.textContent = (label === 'Blind Shot') ? config.labels.challenge2 : label;
     btn.className = (label === activeTab) ? 'active' : '';
     btn.addEventListener('click', () => {
       activeTab = label;
@@ -1222,8 +1230,8 @@ function renderRulesTab(panel) {
     num('3rd correct bonus (seconds)', 'ru-b3', config.bonuses[2], 0, 600) +
     num('Podium slots per station', 'ru-slots', config.slotsPerStation, 1, 5) +
     num('Wrong-answer lockout (seconds)', 'ru-lock', config.lockoutSec, 0, 600) +
-    num('Scramble length (minutes)', 'ru-mins', config.scrambleMins, 1, 120) +
-    num('Blind Shot base time (seconds)', 'ru-base', config.blindBaseSec, 0, 900) +
+    num(esc(config.labels.challenge1) + ' length (minutes)', 'ru-mins', config.scrambleMins, 1, 120) +
+    num(esc(config.labels.challenge2) + ' base time (seconds)', 'ru-base', config.blindBaseSec, 0, 900) +
     num('Team cap', 'ru-cap', config.teamCap, 1, 12) +
     '<label class="field">Host PIN<input id="ru-pin" class="input" maxlength="8" value="' + esc(config.hostPin) + '"></label>' +
     '<button id="ru-save" class="btn violet">Save</button>';
@@ -1586,7 +1594,7 @@ function openQuestionEditor(id) {
 
 /* ---- Live Control tab: phases, per-team adjustments, release, reset ---- */
 function renderLiveControlTab(panel) {
-  const phases = [['setup', 'Setup'], ['scramble', 'Scramble'], ['blindshot', 'Blind Shot'], ['results', 'Results']];
+  const phases = [['setup', 'Setup'], ['scramble', config.labels.challenge1], ['blindshot', config.labels.challenge2], ['results', 'Results']];
   let html = '<h3 class="panel-title">Live Control</h3><div class="phase-row">' +
     phases.map(([key, label]) =>
       '<button class="btn mini' + ((config.phase || 'setup') === key ? ' phase-on' : '') + '" data-phase="' + key + '" data-label="' + label + '">' + label + '</button>'
@@ -1658,12 +1666,12 @@ function fmtSecs(ms) {
 function renderBlindTab(panel) {
   const ids = Object.keys(adminTeams).sort((a, b) => (adminTeams[a].joinedAt || 0) - (adminTeams[b].joinedAt || 0));
   if (!ids.length) {
-    panel.innerHTML = '<h3 class="panel-title">Blind Shot</h3><p style="color:var(--muted);">No teams registered yet.</p>';
+    panel.innerHTML = '<h3 class="panel-title">' + esc(config.labels.challenge2) + '</h3><p style="color:var(--muted);">No teams registered yet.</p>';
     return;
   }
   if (!blindSelectedId || !adminTeams[blindSelectedId]) {
     /* team picker */
-    panel.innerHTML = '<h3 class="panel-title">Blind Shot — pick the shooting team</h3>' +
+    panel.innerHTML = '<h3 class="panel-title">' + esc(config.labels.challenge2) + ' — pick the shooting team</h3>' +
       ids.map((id) => {
         const t = adminTeams[id];
         const b = adminBlind[id];
@@ -1685,7 +1693,7 @@ function renderBlindTab(panel) {
   const t = adminTeams[id];
   const b = adminBlind[id];
   const unusedCards = Object.entries(t.powerups || {}).filter(([, c]) => !c.used);
-  let html = '<h3 class="panel-title">Blind Shot — <span style="color:' + esc(t.colour) + '">' + esc(t.name) + '</span></h3>';
+  let html = '<h3 class="panel-title">' + esc(config.labels.challenge2) + ' — <span style="color:' + esc(t.colour) + '">' + esc(t.name) + '</span></h3>';
 
   if (!b || b.status === 'done') {
     /* pre-turn: arm cards, show computed total */
@@ -1729,7 +1737,7 @@ function renderBlindTab(panel) {
 
   /* mid-turn console */
   const paused = b.status === 'paused';
-  html += '<p style="font-family:var(--display); font-size:2.2rem; margin:.4rem 0;"><span id="bs-clock">' + fmtSecs(blindRemainMs(b)) + '</span>' +
+  html += '<p style="font-family:var(--digits); font-size:2.2rem; margin:.4rem 0;"><span id="bs-clock">' + fmtSecs(blindRemainMs(b)) + '</span>' +
     ' · 🏀 ' + (b.baskets || 0) + '</p>' +
     (b.playedCards || []).map((c) => '<span class="bb-badge">' + esc(c.type) + '</span>').join('') +
     '<div class="bs-btn-row">' +
