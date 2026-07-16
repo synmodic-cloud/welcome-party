@@ -22,8 +22,8 @@ A single-file web app ("The Scramble & Blind Shot") for the 2026 xBU GA Welcome 
 - Defaults: bonuses 30/20/10s · lockout 30s · Scramble 25 min · Blind Shot base 120s · team cap 5 · host PIN "1234" — all editable in the admin Rules tab.
 - QR station text format: `GA-S07` (year-neutral). Printable sheets (station posters, power-up cards ID-only, Staff Master Sheet) are print-styled views inside the same page. Posters must not show the event name.
 
-## Style tokens
-Warm off-white background `#FFF9F2`; accents coral `#FF6B5E`, violet `#8B5CF6`, sky `#38BDF8`, sunny `#FFD166` (owner will supply exact brand hexes before M5 — use these placeholders until then). Rounded cards, soft shadows, chunky buttons. No dark themes, no glassmorphism. Board view designed for 1080p projection with hall-scale type.
+## Style tokens — "Dusk Expedition"
+App background ink teal `#0E2A38` (`--bg-deep`); surfaces `#143647` (`--bg-raised`); hairlines `rgba(239,227,204,.14)` (`--line`); text sand `#EFE3CC` (`--text`, dim `rgba(239,227,204,.62)`); primary accent amber `#F5A942` (time, CTAs, highlights); secondary ember `#FF7A59` (alerts, wrong answers, destructive); Night Rush background `#081C26` (`--night`). Team accents by join order: amber `#F5A942` · coral `#FF7A59` · cyan `#45C4E0` · mint `#4ADE80` · lavender `#A78BFA`. Display type Bebas Neue (uppercase, big numbers), body Plus Jakarta Sans; every timer uses `font-variant-numeric: tabular-nums`. Radius 12–16px max, 1px hairlines over drop shadows, glows reserved for meaning (timers, beacons, live states). Board signature: the sky darkens dusk→night as the Time Rush clock runs; Night Rush = full night with amber basket beacons; results = dawn; confetti restricted to amber/ember/sand. Board designed for 1080p projection with hall-scale type. Print views (posters, cards, staff sheet) are NOT themed — white background, ink-friendly, Archivo Black display.
 
 ## Working style
 - Keep the code readable and commented by section (ROUTER / TEAM VIEW / BOARD / HOST / FIREBASE / PRINT) — a non-developer owner maintains this after handover.
