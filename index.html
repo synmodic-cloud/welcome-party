@@ -620,6 +620,10 @@ function handleJoin() {
   const newRef = db.ref('teams').push();
   let joinedId = null;
 
+  /* Transactions need a live server connection (unlike queued writes) —
+     a phone waking from background can miss by a second, so retry. */
+  const attemptJoin = (attempt) => {
+  joinedId = null;
   db.ref('teams').transaction((teams) => {
     const list = teams || {};
     /* Same name on a released team? → claim it (host-controlled transfer, §4.6) */
@@ -644,7 +648,15 @@ function handleJoin() {
     };
     return list;
   }, (err, committed) => {
-    if (err) { teamNotice('Connection hiccup — try again.'); return; }
+    if (err) {
+      if (attempt < 3) {
+        teamNotice('Connecting… retrying automatically.');
+        setTimeout(() => attemptJoin(attempt + 1), 900 * attempt);
+      } else {
+        teamNotice('No connection to the game server — check your signal, then tap Join again.');
+      }
+      return;
+    }
     if (!committed) {
       db.ref('teams').once('value').then((snap) => {
         const list = snap.val() || {};
@@ -659,6 +671,8 @@ function handleJoin() {
     localStorage.setItem(LS_TEAM_ID, joinedId);
     watchMyTeam(joinedId);
   });
+  };
+  attemptJoin(1);
 }
 
 /* Live-subscribe to my team record; enforce the device binding */
