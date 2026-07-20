@@ -350,11 +350,17 @@ h1, h2, h3 {
   #print-root { display: block; }
   .print-page { page-break-after: always; text-align: center; padding: 1.2cm; }
   .poster-label { font-family: 'Archivo Black', sans-serif; font-size: 2.2rem; letter-spacing: .2em; }
-  .poster-num { font-family: 'Archivo Black', sans-serif; font-size: 8rem; line-height: 1.05; }
-  .poster-qr { margin: 1rem auto; }
-  .poster-qr img, .poster-qr canvas {
-    width: 9cm !important; height: 9cm !important;
-    display: block !important; margin: 0 auto !important; /* centred on the page */
+  .poster-num { font-family: 'Archivo Black', sans-serif; font-size: 7rem; line-height: 1.05; }
+  /* two A5-portrait posters per A4-landscape sheet — cut down the middle */
+  .poster-pair { display: flex; align-items: stretch; padding: 0; }
+  .poster { width: 50%; padding: 1cm .6cm; text-align: center; }
+  .poster + .poster { border-left: 1px dashed #999; } /* cut guide */
+  .poster-qr { margin: .8cm auto; }
+  /* qrcode.js renders a canvas AND an img of the same code — print the img only */
+  .poster-qr canvas { display: none !important; }
+  .poster-qr img {
+    width: 8.5cm !important; height: 8.5cm !important;
+    display: block !important; margin: 0 auto !important;
   }
   .poster-hint { font-size: 1.3rem; font-weight: 700; color: #555; }
   /* power-up card: one A6 card per page */
@@ -371,7 +377,8 @@ h1, h2, h3 {
   .staff-table th, .staff-table td { border: 1px solid #888; padding: .45em .6em; text-align: left; }
   .teamqr-grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 1cm; }
   .teamqr-grid > div { text-align: center; }
-  .teamqr-grid img, .teamqr-grid canvas { width: 6cm !important; height: 6cm !important; }
+  .teamqr-grid canvas { display: none !important; } /* same canvas+img double-render guard */
+  .teamqr-grid img { width: 6cm !important; height: 6cm !important; }
 }
 </style>
 </head>
@@ -530,7 +537,11 @@ const DEFAULT_CONFIG = {
 /* Team accent colours, assigned by join order — all read clearly on --bg-deep */
 const TEAM_COLOURS = ['#F5A942', '#FF7A59', '#45C4E0', '#4ADE80', '#A78BFA'];
 
-let config = structuredClone(DEFAULT_CONFIG);
+/* JSON deep-clone — structuredClone doesn't exist on older Safari (pre-15.4)
+   and would kill the whole script on those phones */
+function deepClone(o) { return JSON.parse(JSON.stringify(o)); }
+
+let config = deepClone(DEFAULT_CONFIG);
 
 /* ======================================================================
    FIREBASE — shared state across the 7 devices. Offline mode until the
@@ -546,7 +557,7 @@ function initFirebase() {
   firebase.initializeApp(FIREBASE_CONFIG);
   db = firebase.database();
   db.ref('config').on('value', (snap) => {
-    config = { ...structuredClone(DEFAULT_CONFIG), ...(snap.val() || {}) };
+    config = { ...deepClone(DEFAULT_CONFIG), ...(snap.val() || {}) };
     renderEventBranding();
     renderBoardPhase();
     renderBoardTeams();
@@ -906,7 +917,7 @@ function redeemCard(raw) {
       cardNotice("Hmm, that code isn't right. Check with the facilitator.");
       return;
     }
-    db.ref('teams/' + myTeamId + '/powerups/' + code).set({ type: card.type, value: card.value ?? null });
+    db.ref('teams/' + myTeamId + '/powerups/' + code).set({ type: card.type, value: (card.value === undefined ? null : card.value) });
     pushFeed(myTeamData.name + ' collected a power-up card!');
     cardNotice('🎴 ' + String(card.type || 'Power-up').toUpperCase() + ' collected!');
     document.getElementById('card-code').value = '';
@@ -1017,7 +1028,7 @@ function renderBoardTeams() {
     /* baskets standings — tiebreak: Scramble bonus earned (SPEC §7), then join order */
     const medals = ['🥇', '🥈', '🥉'];
     teams.sort((a, b) =>
-      (b.baskets ?? -1) - (a.baskets ?? -1) ||
+      (b.baskets != null ? b.baskets : -1) - (a.baskets != null ? a.baskets : -1) ||
       (b.bonusSec || 0) - (a.bonusSec || 0) ||
       (a.joinedAt || 0) - (b.joinedAt || 0)
     ).forEach((t, i) => {
@@ -1194,7 +1205,7 @@ function renderHostPanel() {
 
 /* Small helpers shared by the admin tabs */
 function esc(s) {
-  return String(s ?? '').replace(/[&<>"']/g, (c) =>
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
@@ -1384,16 +1395,21 @@ function runPrint(html, qrJobs, pageSize) {
 function printStationPosters() {
   const ids = Object.keys(adminQuestions).filter((id) => adminQuestions[id].active !== false).sort();
   const jobs = [];
-  const html = ids.map((id) => {
+  const posters = ids.map((id) => {
     const el = 'poster-qr-' + id;
     jobs.push({ el: el, text: 'GA-' + id });
-    return '<div class="print-page">' +
+    return '<div class="poster">' +
       '<div class="poster-label">STATION</div>' +
       '<div class="poster-num">' + stationNum(id) + '</div>' +
       '<div class="poster-qr" id="' + el + '"></div>' +
       '<div class="poster-hint">Scan this with your team device 📱</div></div>';
-  }).join('');
-  runPrint(html, jobs, 'A5 portrait');
+  });
+  /* two A5 posters per A4-landscape sheet */
+  const pages = [];
+  for (let i = 0; i < posters.length; i += 2) {
+    pages.push('<div class="print-page poster-pair">' + posters[i] + (posters[i + 1] || '') + '</div>');
+  }
+  runPrint(pages.join(''), jobs, 'A4 landscape');
 }
 
 function printPowerupCards() {
@@ -1491,7 +1507,7 @@ async function importQuestionsFromExcel(file, replace) {
   const parsed = [];
   const errors = [];
   rows.forEach((r, idx) => {
-    const cell = (i) => String((r || [])[i] ?? '').trim();
+    const cell = (i) => { const v = (r || [])[i]; return String(v == null ? '' : v).trim(); };
     const cells = [0, 1, 2, 3, 4, 5].map(cell);
     if (!cells.some((c) => c)) return;                       /* blank row */
     if (idx === 0 && /correct/i.test(cells[5])) return;      /* template header row */
@@ -1813,7 +1829,7 @@ function exportCsv() {
       t.name, t.colour, t.bonusSec || 0,
       Object.keys(t.cleared || {}).length,
       Object.keys(t.powerups || {}).length,
-      t.baskets ?? '',
+      (t.baskets != null ? t.baskets : ''),
     ]));
   const csv = rows.map((r) => r.map((v) => '"' + String(v).replace(/"/g, '""') + '"').join(',')).join('\n');
   const a = document.createElement('a');
