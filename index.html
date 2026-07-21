@@ -528,6 +528,7 @@ const DEFAULT_CONFIG = {
   lockoutSec: 30,
   scrambleMins: 25,
   blindBaseSec: 120,
+  timeBoostMult: 1.2,   /* Time Boost card: banked seconds × this (base time excluded) */
   teamCap: 5,
   phase: 'setup',
   scrambleEndsAt: null,
@@ -1257,6 +1258,8 @@ function renderRulesTab(panel) {
     num('Wrong-answer lockout (seconds)', 'ru-lock', config.lockoutSec, 0, 600) +
     num(esc(config.labels.challenge1) + ' length (minutes)', 'ru-mins', config.scrambleMins, 1, 120) +
     num(esc(config.labels.challenge2) + ' base time (seconds)', 'ru-base', config.blindBaseSec, 0, 900) +
+    '<label class="field">Time Boost multiplier — banked time × this, base time excluded' +
+    '<input id="ru-mult" class="input" type="number" step="0.1" min="1" max="5" value="' + (config.timeBoostMult || 1.2) + '"></label>' +
     num('Team cap', 'ru-cap', config.teamCap, 1, 12) +
     '<label class="field">Host PIN<input id="ru-pin" class="input" maxlength="8" value="' + esc(config.hostPin) + '"></label>' +
     '<button id="ru-save" class="btn violet">Save</button>';
@@ -1271,6 +1274,10 @@ function renderRulesTab(panel) {
       lockoutSec: val('ru-lock', 30),
       scrambleMins: val('ru-mins', 25),
       blindBaseSec: val('ru-base', 120),
+      timeBoostMult: (function () {
+        const f = parseFloat(document.getElementById('ru-mult').value);
+        return (isNaN(f) || f < 1) ? 1.2 : Math.round(f * 100) / 100;
+      })(),
       teamCap: val('ru-cap', 5),
       hostPin: document.getElementById('ru-pin').value.trim() || '1234',
     }).then(() => adminToast('Rules saved ✓'));
@@ -1366,7 +1373,8 @@ function generateCardSet() {
   CARD_TYPES.forEach((type, i) => {
     for (let k = 0; k < counts[i]; k++) {
       cardId += 1;
-      set[genCardCode(set)] = { type: type, value: type === 'Time Boost' ? 30 : null, cardId: cardId };
+      /* Time Boost carries no fixed value — its multiplier lives in config (Rules tab) */
+      set[genCardCode(set)] = { type: type, value: null, cardId: cardId };
     }
   });
   db.ref('cards').set(set).then(() => adminToast(total + ' cards generated ✓'));
@@ -1731,29 +1739,41 @@ function renderBlindTab(panel) {
       ' <span id="bs-boost"></span> = <b id="bs-total"></b></p>';
     html += unusedCards.length
       ? '<p style="font-weight:700;">Arm cards for this turn:</p>' + unusedCards.map(([code, c]) =>
-          '<label class="field-check" style="margin:.3rem 0;"><input type="checkbox" class="bs-arm" data-code="' + esc(code) + '" data-type="' + esc(c.type) + '" data-value="' + (c.value || 0) + '"> ' +
-          esc(c.type) + (c.type === 'Time Boost' ? ' (+' + (c.value || 30) + 's)' : '') + '</label>').join('')
+          '<label class="field-check" style="margin:.3rem 0;"><input type="checkbox" class="bs-arm" data-code="' + esc(code) + '" data-type="' + esc(c.type) + '"> ' +
+          esc(c.type) + (c.type === 'Time Boost' ? ' (banked ×' + (config.timeBoostMult || 1.2) + ')' : '') + '</label>').join('')
       : '<p style="color:var(--muted);">No unused cards in this team\'s wallet.</p>';
     html += '<div class="bs-btn-row"><button id="bs-start" class="btn violet bs-big">▶ Start</button>' +
       '<button id="bs-back" class="btn mini">Back to teams</button></div>';
     panel.innerHTML = html;
+    /* Time Boost = multiplier on BANKED time only (base excluded); two cards stack */
+    const boostMath = () => {
+      const mult = config.timeBoostMult || 1.2;
+      const nBoost = [...panel.querySelectorAll('.bs-arm:checked')]
+        .filter((c) => c.dataset.type === 'Time Boost').length;
+      const banked = t.bonusSec || 0;
+      const boostedBanked = Math.round(banked * Math.pow(mult, nBoost));
+      return {
+        nBoost: nBoost,
+        totalSec: (config.blindBaseSec || 120) + boostedBanked,
+        gained: boostedBanked - banked,
+        mult: mult,
+      };
+    };
     const updateTotal = () => {
-      const boost = [...panel.querySelectorAll('.bs-arm:checked')]
-        .filter((c) => c.dataset.type === 'Time Boost')
-        .reduce((sum, c) => sum + (parseInt(c.dataset.value, 10) || 30), 0);
-      document.getElementById('bs-boost').textContent = boost ? '+ boost ' + boost + 's' : '';
-      document.getElementById('bs-total').textContent =
-        ((config.blindBaseSec || 120) + (t.bonusSec || 0) + boost) + 's total';
+      const b2 = boostMath();
+      document.getElementById('bs-boost').textContent = b2.nBoost
+        ? '×' + b2.mult + (b2.nBoost > 1 ? ' ×' + b2.mult : '') + ' on banked (+' + b2.gained + 's)'
+        : '';
+      document.getElementById('bs-total').textContent = b2.totalSec + 's total';
     };
     updateTotal();
     panel.querySelectorAll('.bs-arm').forEach((c) => c.addEventListener('change', updateTotal));
     document.getElementById('bs-back').addEventListener('click', () => { blindSelectedId = null; renderHostPanel(); });
     document.getElementById('bs-start').addEventListener('click', () => {
       const armed = [...panel.querySelectorAll('.bs-arm:checked')].map((c) => ({
-        code: c.dataset.code, type: c.dataset.type, value: parseInt(c.dataset.value, 10) || null,
+        code: c.dataset.code, type: c.dataset.type, value: null,
       }));
-      const totalSec = (config.blindBaseSec || 120) + (t.bonusSec || 0) +
-        armed.filter((c) => c.type === 'Time Boost').reduce((s, c) => s + (c.value || 30), 0);
+      const totalSec = boostMath().totalSec;
       blindHistory = [];
       armed.forEach((c) => db.ref('teams/' + id + '/powerups/' + c.code + '/used').set(true));
       db.ref('blindshot/' + id).set({

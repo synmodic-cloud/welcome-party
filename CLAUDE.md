@@ -19,7 +19,7 @@ A single-file web app ("The Scramble & Blind Shot") for the 2026 xBU GA Welcome 
 - Ask the owner for the Firebase web config at the start of M1 if not already in the file.
 - All display copy is **theme-neutral English** (no basketball/rookie/draft language) and the event name/labels come from `/config` (admin Event tab), never hardcoded.
 - Answers stored as salted hashes, not plain indices.
-- Defaults: bonuses 30/20/10s · lockout 30s · Scramble 25 min · Blind Shot base 120s · team cap 5 · host PIN "1234" — all editable in the admin Rules tab.
+- Defaults: bonuses 30/20/10s · lockout 30s · Scramble 25 min · Blind Shot base 120s · Time Boost = banked×1.2 (multiplier on banked time only, base excluded; two cards stack) · team cap 5 · host PIN "1234" — all editable in the admin Rules tab.
 - QR station text format: `GA-S07` (year-neutral). Printable sheets (station posters, power-up cards ID-only, Staff Master Sheet) are print-styled views inside the same page. Posters must not show the event name.
 
 ## Style tokens — "Dusk Expedition"
